@@ -1,13 +1,19 @@
-const mysql = require('mysql2/promise');
+const mysql = require('mysql2');
 
-const pool = mysql.createPool({
-  host: 'md405.wedos.net',
-  user: 'w343072_ow0qq3', // limited user
-  password: 'WRgQ4RcV',
-  database: 'd343072_ow0qq3',
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
+const connection = mysql.createConnection({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  port: process.env.DB_PORT || 3306,
 });
 
-module.exports = pool;
+connection.connect((err) => {
+  if (err) {
+    console.error('❌ Error connecting to MySQL:', err);
+  } else {
+    console.log('✅ Connected to MySQL database');
+  }
+});
+
+module.exports = connection;
