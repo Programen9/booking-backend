@@ -13,45 +13,61 @@ const fs = require('fs');
 const path = require('path');
 const BOOKINGS_FILE = path.join(__dirname, 'bookings.json');
 
+const db = require('./db');
+
 app.post('/book', (req, res) => {
   const newBooking = req.body;
 
   // Prevent past bookings
   const bookingDate = new Date(newBooking.date);
   const now = new Date();
-  now.setHours(0, 0, 0, 0); // ignore time, just compare dates
+  now.setHours(0, 0, 0, 0);
 
   if (bookingDate < now) {
     console.log('❌ Booking is in the past:', newBooking);
     return res.status(400).json({ message: 'Nelze rezervovat zpětně.' });
   }
 
-  // Load existing bookings
-  let bookings = [];
-  if (fs.existsSync(BOOKINGS_FILE)) {
-    const raw = fs.readFileSync(BOOKINGS_FILE);
-    bookings = JSON.parse(raw);
-  }
+  // Check for overlapping bookings in MySQL
+  const checkQuery = `
+    SELECT * FROM bookings 
+    WHERE date = ? 
+    AND (${newBooking.hours.map(() => `JSON_CONTAINS(hours, ?, '$')`).join(' OR ')})
+  `;
+  const params = [newBooking.date, ...newBooking.hours.map(h => `"${h}"`)];
 
-  // Check for overlapping bookings
-  const conflict = bookings.some((b) =>
-    b.date === newBooking.date &&
-    b.hours.some((hour) => newBooking.hours.includes(hour))
-  );
+  db.query(checkQuery, params, (err, results) => {
+    if (err) {
+      console.error('❌ MySQL SELECT error:', err);
+      return res.status(500).json({ message: 'Chyba serveru' });
+    }
 
-  if (conflict) {
-    console.log('❌ Booking conflict:', newBooking);
-    return res.status(409).json({ message: 'Termín je již rezervovaný.' });
-  }
+    if (results.length > 0) {
+      console.log('❌ Booking conflict:', newBooking);
+      return res.status(409).json({ message: 'Termín je již rezervovaný.' });
+    }
 
-  // If no conflict, save booking
-  bookings.push(newBooking);
+    // Insert new booking
+    const insertQuery = `
+      INSERT INTO bookings (date, hours, name, email, phone)
+      VALUES (?, ?, ?, ?, ?)
+    `;
+    db.query(insertQuery, [
+      newBooking.date,
+      JSON.stringify(newBooking.hours),
+      newBooking.name,
+      newBooking.email,
+      newBooking.phone
+    ], (err2) => {
+      if (err2) {
+        console.error('❌ MySQL INSERT error:', err2);
+        return res.status(500).json({ message: 'Chyba při ukládání' });
+      }
 
-  // Save updated list back to file
-  fs.writeFileSync(BOOKINGS_FILE, JSON.stringify(bookings, null, 2));
-
-  console.log('Saved booking:', newBooking);
-  res.status(200).json({ message: 'Booking saved to file' });
+      console.log('✅ Booking saved to MySQL:', newBooking);
+      res.status(200).json({ message: 'Booking uložen do MySQL' });
+    });
+  });
 });
 
 app.get('/bookings/:date', (req, res) => {
