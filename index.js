@@ -30,7 +30,7 @@ app.post('/book', (req, res) => {
     WHERE date = ? 
     AND (${newBooking.hours.map(() => `JSON_CONTAINS(hours, ?, '$')`).join(' OR ')})
   `;
-  const params = [newBooking.date, ...newBooking.hours.map(h => `"${h}"`)];
+  const params = [newBooking.date, ...newBooking.hours];
 
   db.query(checkQuery, params, (err, results) => {
     if (err) {
