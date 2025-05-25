@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "npm config set omit=dev && node index.js"
+    "start": "node --omit=dev index.js"
   },
   "keywords": [],
   "author": "",
