@@ -9,10 +9,6 @@ const PORT = 3001;
 app.use(cors());
 app.use(express.json());
 
-const fs = require('fs');
-const path = require('path');
-const BOOKINGS_FILE = path.join(__dirname, 'bookings.json');
-
 const db = require('./db');
 
 app.post('/book', (req, res) => {
@@ -70,8 +66,6 @@ app.post('/book', (req, res) => {
   });
 });
 
-const db = require('./db'); // ensure this is at the top
-
 app.get('/bookings/:date', (req, res) => {
   const date = req.params.date;
 
@@ -84,7 +78,13 @@ app.get('/bookings/:date', (req, res) => {
         return res.status(500).json({ message: 'Server error' });
       }
 
-      const allHours = results.flatMap((row) => JSON.parse(row.hours));
+      const allHours = results.flatMap((row) => {
+        try {
+          return JSON.parse(row.hours) || [];
+        } catch {
+          return [];
+        }
+      });
       res.json({ hours: allHours });
     }
   );
