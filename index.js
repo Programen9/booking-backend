@@ -1,12 +1,21 @@
 require('./db');
 
 const express = require('express');
-const cors = require('cors');
-
 const app = express();
 const PORT = 3001;
 
-app.use(cors());
+const cors = require('cors');
+
+const allowedOrigins = [
+  'http://localhost:5173', // your local frontend
+  'https://your-deployed-frontend.com' // later when deployed
+];
+
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true
+}));
+
 app.use(express.json());
 
 const db = require('./db');
