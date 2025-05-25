@@ -70,28 +70,45 @@ app.post('/book', (req, res) => {
   });
 });
 
+const db = require('./db'); // ensure this is at the top
+
 app.get('/bookings/:date', (req, res) => {
   const date = req.params.date;
 
-  let bookings = [];
-  if (fs.existsSync(BOOKINGS_FILE)) {
-    const raw = fs.readFileSync(BOOKINGS_FILE);
-    bookings = JSON.parse(raw);
-  }
+  db.query(
+    'SELECT hours FROM bookings WHERE date = ?',
+    [date],
+    (err, results) => {
+      if (err) {
+        console.error('❌ MySQL query error:', err);
+        return res.status(500).json({ message: 'Server error' });
+      }
 
-  const matched = bookings.filter((b) => b.date === date);
-  const hours = matched.flatMap((b) => b.hours);
-
-  res.json({ hours });
+      const allHours = results.flatMap((row) => JSON.parse(row.hours));
+      res.json({ hours: allHours });
+    }
+  );
 });
 
 app.get('/all-bookings', (req, res) => {
-  let bookings = [];
-  if (fs.existsSync(BOOKINGS_FILE)) {
-    const raw = fs.readFileSync(BOOKINGS_FILE);
-    bookings = JSON.parse(raw);
-  }
-  res.json(bookings);
+  db.query('SELECT * FROM bookings', (err, results) => {
+    if (err) {
+      console.error('❌ MySQL query error:', err);
+      return res.status(500).json({ message: 'Server error' });
+    }
+
+    // Parse hours JSON
+    const bookings = results.map((row) => ({
+      id: row.id,
+      date: row.date,
+      hours: JSON.parse(row.hours),
+      name: row.name,
+      email: row.email,
+      phone: row.phone,
+    }));
+
+    res.json(bookings);
+  });
 });
 
 app.listen(PORT, () => {
