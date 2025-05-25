@@ -6,13 +6,22 @@ const PORT = 3001;
 
 const cors = require('cors');
 
-const allowedOrigins = [
-  'http://localhost:5173', // your local frontend
-  'https://your-deployed-frontend.com' // later when deployed
-];
-
 app.use(cors({
-  origin: allowedOrigins,
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps, curl, Postman)
+    if (!origin) return callback(null, true);
+    
+    const allowed = [
+      'http://localhost:5173',
+      'https://your-deployed-frontend.com'
+    ];
+    
+    if (allowed.includes(origin)) {
+      return callback(null, true);
+    } else {
+      return callback(new Error('CORS not allowed from this origin'), false);
+    }
+  },
   credentials: true
 }));
 
