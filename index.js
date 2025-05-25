@@ -95,5 +95,5 @@ app.get('/all-bookings', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Backend running on http://localhost:${PORT}`);
+  console.log(`✅ Backend is running. Local: http://localhost:${PORT} or hosted on Railway.`);
 });
