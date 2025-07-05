@@ -13,7 +13,7 @@ app.use(cors({
     
     const allowed = [
       'http://localhost:5173',
-      'https://your-deployed-frontend.com'
+      'https://topzkusebny-booking-frontend.netlify.app'
     ];
     
     if (allowed.includes(origin)) {
