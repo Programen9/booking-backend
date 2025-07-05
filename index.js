@@ -89,21 +89,25 @@ app.get('/bookings/:date', (req, res) => {
   console.log('📆 Incoming date string:', date);
 
   db.query(
-    'SELECT hours FROM bookings WHERE date = ?',
-    [date],
+    'SELECT date, hours FROM bookings',
+    [],
     (err, results) => {
       if (err) {
         console.error('❌ MySQL query error:', err);
         return res.status(500).json({ message: 'Server error' });
       }
 
-      const allHours = results.flatMap((row) => {
+      console.log('🧾 Raw results from DB:', results);
+
+      const matching = results.filter(row => row.date === date);
+      const allHours = matching.flatMap((row) => {
         try {
           return JSON.parse(row.hours) || [];
         } catch {
           return [];
         }
       });
+
       res.json({ hours: allHours });
     }
   );
