@@ -86,6 +86,7 @@ app.post('/book', (req, res) => {
 
 app.get('/bookings/:date', (req, res) => {
   const date = req.params.date;
+  console.log('📆 Incoming date string:', date);
 
   db.query(
     'SELECT hours FROM bookings WHERE date = ?',
