@@ -29,6 +29,17 @@ app.use(express.json());
 
 const db = require('./db');
 
+function safeParseHours(val) {
+  if (typeof val === 'string') {
+    try {
+      return JSON.parse(val);
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(val) ? val : [];
+}
+
 app.post('/book', (req, res) => {
   const newBooking = req.body;
 
@@ -100,13 +111,7 @@ app.get('/bookings/:date', (req, res) => {
       console.log('🧾 Raw results from DB:', results);
 
       const matching = results.filter(row => row.date === date);
-      const allHours = matching.flatMap((row) => {
-        try {
-          return JSON.parse(row.hours) || [];
-        } catch {
-          return [];
-        }
-      });
+      const allHours = matching.flatMap(row => safeParseHours(row.hours));
 
       res.json({ hours: allHours });
     }
@@ -124,7 +129,7 @@ app.get('/all-bookings', (req, res) => {
     const bookings = results.map((row) => ({
       id: row.id,
       date: row.date,
-      hours: JSON.parse(row.hours),
+      hours: safeParseHours(row.hours),
       name: row.name,
       email: row.email,
       phone: row.phone,
