@@ -110,8 +110,24 @@ app.get('/bookings/:date', (req, res) => {
 
       console.log('🧾 Raw results from DB:', results);
 
-      const matching = results.filter(row => row.date === date);
-      const allHours = matching.flatMap(row => safeParseHours(row.hours));
+      const matching = results.filter(row => {
+        const rowDate = new Date(row.date).toISOString().split('T')[0]; // 'YYYY-MM-DD'
+        return rowDate === date;
+      });
+
+      const allHours = matching.flatMap((row) => {
+        if (typeof row.hours === 'string') {
+          try {
+            return JSON.parse(row.hours);
+          } catch {
+            return [];
+          }
+        } else if (Array.isArray(row.hours)) {
+          return row.hours;
+        } else {
+          return [];
+        }
+      });
 
       res.json({ hours: allHours });
     }
