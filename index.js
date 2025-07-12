@@ -1,5 +1,7 @@
 require('./db');
 
+const authMiddleware = require('./authMiddleware');
+
 const express = require('express');
 const app = express();
 const PORT = 3001;
@@ -134,7 +136,7 @@ app.get('/bookings/:date', (req, res) => {
   );
 });
 
-app.get('/all-bookings', (req, res) => {
+app.get('/all-bookings', authMiddleware, (req, res) => {
   db.query('SELECT * FROM bookings', (err, results) => {
     if (err) {
       console.error('❌ MySQL query error:', err);
