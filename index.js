@@ -157,6 +157,24 @@ app.get('/all-bookings', authMiddleware, (req, res) => {
   });
 });
 
+app.delete('/bookings/:id', authMiddleware, (req, res) => {
+  const bookingId = req.params.id;
+
+  db.query('DELETE FROM bookings WHERE id = ?', [bookingId], (err, result) => {
+    if (err) {
+      console.error('❌ MySQL DELETE error:', err);
+      return res.status(500).json({ message: 'Chyba serveru při mazání' });
+    }
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Rezervace nenalezena' });
+    }
+
+    console.log(`🗑️ Booking with ID ${bookingId} deleted`);
+    res.status(200).json({ message: 'Rezervace úspěšně smazána' });
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Backend is running. Local: http://localhost:${PORT} or hosted on Railway.`);
 });
