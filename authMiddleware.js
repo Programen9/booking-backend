@@ -1,4 +1,4 @@
-export function checkAdminPassword(req, res, next) {
+function checkAdminPassword(req, res, next) {
   const providedPassword = req.headers['x-admin-password'];
 
   if (!providedPassword || providedPassword !== process.env.ADMIN_PASSWORD) {
@@ -7,3 +7,5 @@ export function checkAdminPassword(req, res, next) {
 
   next();
 }
+
+module.exports = checkAdminPassword;
