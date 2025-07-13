@@ -42,8 +42,49 @@ function safeParseHours(val) {
   return Array.isArray(val) ? val : [];
 }
 
-app.post('/book', async (req, res) => {
-  const newBooking = req.body;
+app.post('/book', (req, res) => {
+  const { date, hours, name, email, phone } = req.body;
+
+  // Basic presence check
+  if (!date || !hours || !name || !email || !phone) {
+    return res.status(400).json({ message: 'Chybí některá z povinných položek.' });
+  }
+
+  // Validate date
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({ message: 'Neplatný formát data.' });
+  }
+
+  // Validate hours as array of strings/numbers (e.g., ['14:00', '15:00'])
+  if (!Array.isArray(hours) || hours.some(h => typeof h !== 'string' && typeof h !== 'number')) {
+    return res.status(400).json({ message: 'Neplatný formát hodin.' });
+  }
+
+  // Name should contain at least 2 words
+  if (typeof name !== 'string' || !/^\s*\S+\s+\S+/.test(name)) {
+    return res.status(400).json({ message: 'Zadejte své jméno a příjmení.' });
+  }
+
+  // Basic email check
+  if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ message: 'Zadejte platný email.' });
+  }
+
+  // Phone number check (digits, spaces, optional +)
+  if (typeof phone !== 'string' || !/^(\+)?[0-9 ]{9,16}$/.test(phone)) {
+    return res.status(400).json({ message: 'Zadejte platné telefonní číslo.' });
+  }
+
+  const bookingDate = new Date(date);
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
+  if (bookingDate < now) {
+    console.log('❌ Booking is in the past:', req.body);
+    return res.status(400).json({ message: 'Nelze rezervovat zpětně.' });
+  }
+
+  // ...continue with DB query as you already have
 
   // ✅ reCAPTCHA ověření
   const token = newBooking.token;
