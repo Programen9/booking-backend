@@ -2,6 +2,8 @@ require('./db');
 
 const authMiddleware = require('./authMiddleware');
 
+const sendConfirmationEmail = require('./mailer');
+
 const express = require('express');
 const app = express();
 const PORT = 3001;
@@ -101,24 +103,27 @@ app.post('/book', async (req, res) => {
       return res.status(409).json({ message: 'Termín je již rezervovaný.' });
     }
 
-    // 💾 Uložení do DB
-    const insertQuery = `
-      INSERT INTO bookings (date, hours, name, email, phone)
-      VALUES (?, ?, ?, ?, ?)
-    `;
     db.query(insertQuery, [
       newBooking.date,
       JSON.stringify(newBooking.hours),
       newBooking.name,
       newBooking.email,
       newBooking.phone
-    ], (err2) => {
+    ], async (err2) => {
       if (err2) {
         console.error('❌ MySQL INSERT error:', err2);
         return res.status(500).json({ message: 'Chyba při ukládání' });
       }
 
       console.log('✅ Booking saved to MySQL:', newBooking);
+
+      try {
+        await sendConfirmationEmail(newBooking);
+      } catch (err) {
+        console.error('❌ Failed to send confirmation email:', err);
+        // Don't fail the request just because of email
+      }
+
       res.status(200).json({ message: 'Booking uložen do MySQL' });
     });
   });
