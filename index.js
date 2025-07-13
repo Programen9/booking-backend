@@ -42,10 +42,37 @@ function safeParseHours(val) {
   return Array.isArray(val) ? val : [];
 }
 
-app.post('/book', (req, res) => {
+app.post('/book', async (req, res) => {
   const newBooking = req.body;
 
-  // Prevent past bookings
+  // ✅ reCAPTCHA ověření
+  const token = newBooking.token;
+  if (!token) {
+    return res.status(400).json({ message: 'Chybí reCAPTCHA token' });
+  }
+
+  try {
+    const recaptchaResponse = await fetch('https://www.google.com/recaptcha/api/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        secret: process.env.RECAPTCHA_SECRET_KEY,
+        response: token,
+      }),
+    });
+
+    const recaptchaData = await recaptchaResponse.json();
+
+    if (!recaptchaData.success || recaptchaData.score < 0.5) {
+      console.warn('❌ reCAPTCHA selhalo:', recaptchaData);
+      return res.status(403).json({ message: 'Ověření reCAPTCHA selhalo.' });
+    }
+  } catch (error) {
+    console.error('❌ Chyba při ověřování reCAPTCHA:', error);
+    return res.status(500).json({ message: 'Chyba při ověřování reCAPTCHA.' });
+  }
+
+  // 🚫 Zákaz rezervace zpětně
   const bookingDate = new Date(newBooking.date);
   const now = new Date();
   now.setHours(0, 0, 0, 0);
@@ -55,7 +82,7 @@ app.post('/book', (req, res) => {
     return res.status(400).json({ message: 'Nelze rezervovat zpětně.' });
   }
 
-  // Check for overlapping bookings in MySQL
+  // 🔍 Kontrola kolize v MySQL
   const checkQuery = `
     SELECT * FROM bookings 
     WHERE date = ? 
@@ -74,7 +101,7 @@ app.post('/book', (req, res) => {
       return res.status(409).json({ message: 'Termín je již rezervovaný.' });
     }
 
-    // Insert new booking
+    // 💾 Uložení do DB
     const insertQuery = `
       INSERT INTO bookings (date, hours, name, email, phone)
       VALUES (?, ?, ?, ?, ?)
