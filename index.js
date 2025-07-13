@@ -103,6 +103,11 @@ app.post('/book', async (req, res) => {
       return res.status(409).json({ message: 'Termín je již rezervovaný.' });
     }
 
+    const insertQuery = `
+      INSERT INTO bookings (date, hours, name, email, phone)
+      VALUES (?, ?, ?, ?, ?)
+    `;
+
     db.query(insertQuery, [
       newBooking.date,
       JSON.stringify(newBooking.hours),
