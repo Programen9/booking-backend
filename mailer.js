@@ -21,7 +21,7 @@ async function sendConfirmationEmail(booking) {
 
   try {
     await resend.emails.send({
-      from: 'TopZkušebny <booking@onreply.resend.dev>',
+      from: 'TopZkušebny <onboarding@resend.dev>'
       to: email,
       subject: 'Rezervace potvrzena – TopZkušebny',
       html
