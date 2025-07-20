@@ -10,6 +10,8 @@ const PORT = 3001;
 
 const cors = require('cors');
 
+const sanitizeHtml = require('sanitize-html');
+
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (like mobile apps, curl, Postman)
@@ -46,6 +48,10 @@ function safeParseHours(val) {
 
 app.post('/book', async (req, res) => {
   const newBooking = req.body;
+  // Sanitize user input to prevent XSS
+  newBooking.name = sanitizeHtml(newBooking.name, { allowedTags: [], allowedAttributes: {} });
+  newBooking.email = sanitizeHtml(newBooking.email, { allowedTags: [], allowedAttributes: {} });
+  newBooking.phone = sanitizeHtml(newBooking.phone, { allowedTags: [], allowedAttributes: {} });
 
   // ✅ reCAPTCHA ověření
   const token = newBooking.token;
