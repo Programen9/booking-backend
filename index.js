@@ -12,6 +12,16 @@ const cors = require('cors');
 
 const sanitizeHtml = require('sanitize-html');
 
+const rateLimit = require('express-rate-limit');
+
+const limiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 10, // Limit each IP to 10 requests per minute
+  message: {
+    message: 'Too many requests from this IP. Please try again later.',
+  },
+});
+
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (like mobile apps, curl, Postman)
@@ -30,6 +40,12 @@ app.use(cors({
   },
   credentials: true
 }));
+
+app.use('/book', limiter);
+app.use('/admin', limiter);
+app.use('/bookings', limiter);
+app.use('/all-bookings', limiter);
+app.use('/delete', limiter); // if this exists in your admin panel
 
 app.use(express.json());
 
