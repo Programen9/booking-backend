@@ -6,7 +6,6 @@ const sendConfirmationEmail = require('./mailer');
 
 const express = require('express');
 const app = express();
-app.set('trust proxy', 1); // required behind a reverse proxy
 const PORT = 3001;
 
 const cors = require('cors');
@@ -42,13 +41,11 @@ app.use(cors({
   credentials: true
 }));
 
-app.post('/book', limiter, async (req, res) => {
-  // ... existing /book code ...
-});
-
-app.get('/bookings/:date', limiter, (req, res) => {
-  // ... existing /bookings code ...
-});
+app.use('/book', limiter);
+app.use('/admin', limiter);
+app.use('/bookings', limiter);
+app.use('/all-bookings', limiter);
+app.use('/delete', limiter); // if this exists in your admin panel
 
 app.use(express.json());
 
