@@ -5,8 +5,8 @@ const authMiddleware = require('./authMiddleware');
 const sendConfirmationEmail = require('./mailer');
 
 const express = require('express');
-app.set('trust proxy', 1); // required behind a reverse proxy
 const app = express();
+app.set('trust proxy', 1); // required behind a reverse proxy
 const PORT = 3001;
 
 const cors = require('cors');
