@@ -7,7 +7,7 @@ async function sendConfirmationEmail(booking) {
   const subject = `Potvrzení rezervace – ${booking.date}`;
   const htmlContent = `
     <h2>Potvrzení rezervace</h2>
-    <p>Děkujeme za rezervaci.</p>
+    <p>Potvrzujeme Vaši rezervaci.</p>
     <p><strong>Datum:</strong> ${booking.date}</p>
     <p><strong>Hodiny:</strong> ${booking.hours.join(', ')}</p>
     <p><strong>Jméno:</strong> ${booking.name}</p>
