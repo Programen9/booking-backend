@@ -22,7 +22,7 @@ async function sendConfirmationEmail(booking) {
   try {
     console.log('📬 [Resend] sending to customer:', email);
     const r1 = await resend.emails.send({
-      from: 'TopZkušebny <onboarding@resend.dev>',
+      from: 'TopZkušebny <info@topzkusebny.cz>',
       to: email,
       subject,
       html,
@@ -37,7 +37,7 @@ async function sendConfirmationEmail(booking) {
   try {
     console.log('📬 [Resend] sending to internal: info@topzkusebny.cz');
     const r2 = await resend.emails.send({
-      from: 'TopZkušebny <onboarding@resend.dev>',
+      from: 'TopZkušebny <info@topzkusebny.cz>',
       to: 'info@topzkusebny.cz',
       subject: `Kopie potvrzení: ${subject}`,
       html,
