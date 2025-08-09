@@ -1,34 +1,40 @@
 // mailer.js
+
+const { Resend } = require('resend');
+const resend = new Resend(process.env.RESEND_API_KEY);
+
 async function sendConfirmationEmail(booking) {
-  const { Resend } = await import('resend');
-  const resend = new Resend(process.env.RESEND_API_KEY);
-
-  const { name, email, date, hours } = booking;
-
-  const hoursText = hours.join(', ');
-  const html = `
-    <h2>Rezervace potvrzena – TopZkušebny</h2>
-    <p>Dobrý den,</p>
-    <p>Děkujeme za vaši rezervaci zkušebny. Zde je její shrnutí:</p>
-    <ul>
-      <li><strong>Datum:</strong> ${date}</li>
-      <li><strong>Čas:</strong> ${hoursText}</li>
-      <li><strong>Jméno:</strong> ${name}</li>
-    </ul>
-    <p>V případě změn nás kontaktujte na <a href="mailto:info@topzkusebny.cz">info@topzkusebny.cz</a>.</p>
-    <p>Těšíme se na vás!<br/>TopZkušebny.cz</p>
+  const subject = `Potvrzení rezervace – ${booking.date}`;
+  const htmlContent = `
+    <h2>Potvrzení rezervace</h2>
+    <p>Děkujeme za rezervaci.</p>
+    <p><strong>Datum:</strong> ${booking.date}</p>
+    <p><strong>Hodiny:</strong> ${booking.hours.join(', ')}</p>
+    <p><strong>Jméno:</strong> ${booking.name}</p>
+    <p><strong>Email:</strong> ${booking.email}</p>
+    <p><strong>Telefon:</strong> ${booking.phone}</p>
   `;
 
   try {
+    // Send to customer
     await resend.emails.send({
       from: 'TopZkušebny <onboarding@resend.dev>',
-      to: email,
-      subject: 'Rezervace potvrzena – TopZkušebny',
-      html
+      to: booking.email,
+      subject,
+      html: htmlContent,
     });
-    console.log('📧 Confirmation email sent to', email);
-  } catch (err) {
-    console.error('❌ Email send error:', err);
+
+    // Send to internal address
+    await resend.emails.send({
+      from: 'TopZkušebny <onboarding@resend.dev>',
+      to: 'info@topzkusebny.cz',
+      subject: `Kopie potvrzení: ${subject}`,
+      html: htmlContent,
+    });
+
+    console.log(`📧 Confirmation email sent to ${booking.email} and info@topzkusebny.cz`);
+  } catch (error) {
+    console.error('❌ Failed to send confirmation email:', error);
   }
 }
 
