@@ -1,40 +1,51 @@
 // mailer.js
-
 const { Resend } = require('resend');
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function sendConfirmationEmail(booking) {
-  const subject = `Potvrzení rezervace – ${booking.date}`;
-  const htmlContent = `
+  const { name, email, date, hours, phone } = booking;
+
+  const subject = `Potvrzení rezervace – ${date}`;
+  const html = `
     <h2>Potvrzení rezervace</h2>
-    <p>Potvrzujeme Vaši rezervaci.</p>
-    <p><strong>Datum:</strong> ${booking.date}</p>
-    <p><strong>Hodiny:</strong> ${booking.hours.join(', ')}</p>
-    <p><strong>Jméno:</strong> ${booking.name}</p>
-    <p><strong>Email:</strong> ${booking.email}</p>
-    <p><strong>Telefon:</strong> ${booking.phone}</p>
+    <p>Děkujeme za rezervaci ve zkušebně Banger!</p>
+    <ul>
+      <li><strong>Datum:</strong> ${date}</li>
+      <li><strong>Hodiny:</strong> ${Array.isArray(hours) ? hours.join(', ') : String(hours)}</li>
+      <li><strong>Jméno:</strong> ${name}</li>
+      <li><strong>Email:</strong> ${email}</li>
+      <li><strong>Telefon:</strong> ${phone ?? '-'}</li>
+    </ul>
   `;
 
+  // 1) Customer
   try {
-    // Send to customer
-    await resend.emails.send({
+    console.log('📬 [Resend] sending to customer:', email);
+    const r1 = await resend.emails.send({
       from: 'TopZkušebny <onboarding@resend.dev>',
-      to: booking.email,
+      to: email,
       subject,
-      html: htmlContent,
+      html,
+      reply_to: 'info@topzkusebny.cz',
     });
+    console.log('✅ [Resend] customer sent:', r1);
+  } catch (err) {
+    console.error('❌ [Resend] customer send failed:', err?.message || err);
+  }
 
-    // Send to internal address
-    await resend.emails.send({
+  // 2) Internal copy
+  try {
+    console.log('📬 [Resend] sending to internal: info@topzkusebny.cz');
+    const r2 = await resend.emails.send({
       from: 'TopZkušebny <onboarding@resend.dev>',
       to: 'info@topzkusebny.cz',
       subject: `Kopie potvrzení: ${subject}`,
-      html: htmlContent,
+      html,
+      reply_to: 'info@topzkusebny.cz',
     });
-
-    console.log(`📧 Confirmation email sent to ${booking.email} and info@topzkusebny.cz`);
-  } catch (error) {
-    console.error('❌ Failed to send confirmation email:', error);
+    console.log('✅ [Resend] internal sent:', r2);
+  } catch (err) {
+    console.error('❌ [Resend] internal send failed:', err?.message || err);
   }
 }
 
