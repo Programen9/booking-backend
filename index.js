@@ -6,6 +6,7 @@ const sendConfirmationEmail = require('./mailer');
 
 const express = require('express');
 const app = express();
+app.set('trust proxy', 1); // ✅ behind Railway proxy, fixes express-rate-limit warning
 const PORT = 3001;
 
 const cors = require('cors');
@@ -16,10 +17,10 @@ const rateLimit = require('express-rate-limit');
 
 const limiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
-  max: 10, // Limit each IP to 10 requests per minute
-  message: {
-    message: 'Too many requests from this IP. Please try again later.',
-  },
+  max: 10,                 // Limit each IP to 10 requests per minute
+  standardHeaders: true,   // send RateLimit-* headers
+  legacyHeaders: false,    // disable X-RateLimit-* headers
+  message: { message: 'Too many requests from this IP. Please try again later.' },
 });
 
 app.use(cors({
