@@ -1,18 +1,17 @@
+// index.js
 require('./db');
 
 const authMiddleware = require('./authMiddleware');
-
-const sendConfirmationEmail = require('./mailer');
+const sendConfirmationEmail = require('./mailer');           // default export (confirmation)
+const { sendCancellationEmail } = require('./mailer');       // new named export (cancellation)
 
 const express = require('express');
 const app = express();
-app.set('trust proxy', 1); // ✅ behind Railway proxy, fixes express-rate-limit warning
+app.set('trust proxy', 1); // behind Railway proxy (fixes express-rate-limit X-Forwarded-For warning)
 const PORT = 3001;
 
 const cors = require('cors');
-
 const sanitizeHtml = require('sanitize-html');
-
 const rateLimit = require('express-rate-limit');
 
 const limiter = rateLimit({
@@ -27,12 +26,12 @@ app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (like mobile apps, curl, Postman)
     if (!origin) return callback(null, true);
-    
+
     const allowed = [
       'http://localhost:5173',
       'https://topzkusebny-booking-frontend.netlify.app'
     ];
-    
+
     if (allowed.includes(origin)) {
       return callback(null, true);
     } else {
@@ -232,6 +231,62 @@ app.delete('/bookings/:id', authMiddleware, (req, res) => {
 
     console.log(`🗑️ Booking with ID ${bookingId} deleted`);
     res.status(200).json({ message: 'Rezervace úspěšně smazána' });
+  });
+});
+
+/**
+ * NEW: Cancel a booking – send cancellation email, then delete.
+ * Admin-only (authMiddleware).
+ */
+app.post('/bookings/:id/cancel', authMiddleware, (req, res) => {
+  const bookingId = req.params.id;
+  const { message } = req.body || {};
+
+  // 1) Load booking data first
+  db.query('SELECT * FROM bookings WHERE id = ?', [bookingId], async (selErr, results) => {
+    if (selErr) {
+      console.error('❌ MySQL SELECT error:', selErr);
+      return res.status(500).json({ message: 'Chyba serveru' });
+    }
+    if (!results || results.length === 0) {
+      return res.status(404).json({ message: 'Rezervace nenalezena' });
+    }
+
+    const row = results[0];
+    const hours = (() => {
+      if (Array.isArray(row.hours)) return row.hours;
+      try { return JSON.parse(row.hours); } catch { return []; }
+    })();
+
+    const booking = {
+      id: row.id,
+      date: row.date,
+      hours,
+      name: row.name,
+      email: row.email,
+      phone: row.phone,
+    };
+
+    // 2) Try to send email (don't abort deletion if email fails)
+    try {
+      console.log('✉️ Sending cancellation email for booking ID:', bookingId);
+      await sendCancellationEmail(booking, message);
+    } catch (e) {
+      console.error('❌ Failed to send cancellation email:', e?.message || e);
+    }
+
+    // 3) Delete the booking
+    db.query('DELETE FROM bookings WHERE id = ?', [bookingId], (delErr, result) => {
+      if (delErr) {
+        console.error('❌ MySQL DELETE error:', delErr);
+        return res.status(500).json({ message: 'Chyba serveru při mazání' });
+      }
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ message: 'Rezervace nenalezena' });
+      }
+      console.log(`🗑️ Booking with ID ${bookingId} cancelled and deleted`);
+      res.status(200).json({ message: 'Rezervace zrušena a email odeslán (pokud bylo možné).' });
+    });
   });
 });
 
