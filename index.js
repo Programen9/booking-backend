@@ -87,7 +87,7 @@ async function gopayCreatePayment({ amount_czk, order_number, name, email, retur
 
   const payload = {
     target: { goid: Number(GOPAY_GOID), type: 'ACCOUNT' },
-    amount: amount_czk * 100, // GoPay wants minor units
+    amount: amount_czk * 100, // minor units
     currency: 'CZK',
     order_number,
     lang: 'cs',
@@ -120,7 +120,7 @@ async function gopayCreatePayment({ amount_czk, order_number, name, email, retur
   return { id: data.id, gw_url: data.gw_url || data.gateway_url };
 }
 
-// Get payment status (used by webhook or manual check)
+// Get payment status
 async function gopayGetPayment(id) {
   const { access_token } = await gopayToken();
   const r = await fetch(`${GOPAY_BASE}/payments/payment/${id}`, {
@@ -128,7 +128,7 @@ async function gopayGetPayment(id) {
   });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(`GoPay status error: ${r.status} ${JSON.stringify(data)}`);
-  return data; // { id, state: { ... } }
+  return data; // { id, state: { id: 'PAID' | 'CANCELED' | ... } }
 }
 
 /* ------------------ Utilities ------------------ */
@@ -138,7 +138,7 @@ function safeParseHours(val) {
 }
 
 /* =========================
-   PUBLIC: create booking (now PENDING + GoPay link)
+   PUBLIC: create booking (PENDING + GoPay link)
    ========================= */
 app.post('/book', publicLimiter, async (req, res) => {
   const newBooking = req.body;
@@ -211,7 +211,7 @@ app.post('/book', publicLimiter, async (req, res) => {
       const bookingId = result.insertId;
       try {
         // Create GoPay payment
-        const returnUrl = 'https://topzkusebny.cz'; // after payment (can be a dedicated thank-you)
+        const returnUrl = 'https://topzkusebny.cz'; // after payment
         const notifyUrl = `${process.env.PUBLIC_API_BASE || 'https://booking-backend-production-ef0d.up.railway.app'}/gopay/webhook`;
 
         const { id: gopayId, gw_url } = await gopayCreatePayment({
@@ -242,7 +242,7 @@ app.post('/book', publicLimiter, async (req, res) => {
               console.error('❌ Failed to send payment request email:', emErr);
             }
 
-            // respond to FE with link, in case you want to redirect there
+            // respond to FE
             res.status(200).json({
               message: 'Rezervace vytvořena. Čeká se na platbu.',
               payment_url: gw_url,
@@ -253,8 +253,11 @@ app.post('/book', publicLimiter, async (req, res) => {
         );
       } catch (payErr) {
         console.error('❌ GoPay create error:', payErr);
-        // mark failed & free slot immediately
-        db.query(`UPDATE bookings SET payment_status='failed', payment_error=? WHERE id=?`, [String(payErr), bookingId], () => {});
+        db.query(
+          `UPDATE bookings SET payment_status='failed', payment_error=? WHERE id=?`,
+          [String(payErr), bookingId],
+          () => {}
+        );
         res.status(502).json({ message: 'Chyba platební brány. Zkuste to prosím znovu.' });
       }
     });
@@ -262,7 +265,7 @@ app.post('/book', publicLimiter, async (req, res) => {
 });
 
 /* =========================
-   PUBLIC: booked hours for a date (unchanged; limited)
+   PUBLIC: booked hours for a date (limited)
    ========================= */
 app.get('/bookings/:date', publicLimiter, (req, res) => {
   const date = req.params.date;
@@ -325,28 +328,22 @@ app.post('/bookings/:id/cancel', authMiddleware, (req, res) => {
 });
 
 /* =========================
-   GOPAY: webhook (payment status)
+   GOPAY: webhook (payment status) — no auto-cancel on non-PAID
    ========================= */
-// --- GoPay webhook: accept GET with ?id= and POST with JSON or form ---
 app.all('/gopay/webhook', express.urlencoded({ extended: false }), async (req, res) => {
   try {
-    // id can arrive as:
-    // - GET:   /gopay/webhook?id=123
-    // - POST JSON: { "id": 123 }
-    // - POST form: id=123
+    // id can arrive as GET ?id= / ?parent_id= or POST (json/form)
     const id =
       (req.query && (req.query.id || req.query.parent_id)) ||
       (req.body && (req.body.id || req.body.parent_id));
 
     if (!id) {
-      // Log and 200 to avoid retries storms, but include message
       console.warn('GoPay webhook hit without id', { method: req.method, query: req.query, body: req.body });
       return res.status(200).json({ ok: true, note: 'missing id' });
     }
 
-    // Fetch live status from GoPay
     const status = await gopayGetPayment(id);
-    const state = status?.state?.id || status?.state; // e.g., "PAID", "CANCELED", "TIMEOUTED", etc.
+    const state = status?.state?.id || status?.state;
 
     db.query('SELECT * FROM bookings WHERE gopay_payment_id = ?', [id], (err, results) => {
       if (err) {
@@ -363,7 +360,7 @@ app.all('/gopay/webhook', express.urlencoded({ extended: false }), async (req, r
 
       if (state === 'PAID') {
         db.query(
-          `UPDATE bookings SET payment_status='paid', payment_paid_at=NOW() WHERE id=?`,
+          `UPDATE bookings SET payment_status='paid', payment_paid_at=NOW(), payment_error=NULL WHERE id=?`,
           [row.id],
           async (upErr) => {
             if (upErr) console.error('❌ MySQL UPDATE error:', upErr);
@@ -381,21 +378,21 @@ app.all('/gopay/webhook', express.urlencoded({ extended: false }), async (req, r
             return res.status(200).json({ ok: true, state: 'PAID' });
           }
         );
-      } else if (state === 'CANCELED' || state === 'TIMEOUTED' || state === 'FAILED') {
-        db.query('DELETE FROM bookings WHERE id=?', [row.id], async (delErr) => {
-          if (delErr) console.error('❌ MySQL DELETE error:', delErr);
-          try { await sendPaymentExpiredEmail({ email: row.email, date: row.date, hours }); } catch {}
-          return res.status(200).json({ ok: true, state });
-        });
       } else {
-        // Handle intermediate states gracefully
-        console.log('GoPay webhook intermediate state:', state, 'for payment', id);
-        return res.status(200).json({ ok: true, state });
+        // Do NOT cancel here; let the 15-minute expiry handle it.
+        db.query(
+          `UPDATE bookings SET payment_error=? WHERE id=?`,
+          [JSON.stringify({ state }), row.id],
+          (upErr) => {
+            if (upErr) console.error('❌ MySQL UPDATE error (payment_error):', upErr);
+            console.log('GoPay webhook non-PAID state noted:', state, 'for payment', id);
+            return res.status(200).json({ ok: true, state });
+          }
+        );
       }
     });
   } catch (e) {
     console.error('❌ webhook error:', e);
-    // Always 200 to prevent repeated retries from gateway
     return res.status(200).json({ ok: true });
   }
 });
@@ -425,6 +422,64 @@ setInterval(() => {
     }
   );
 }, 60 * 1000); // run every minute
+
+/* =========================
+   POLLING: confirm paid bookings every 30s (no cancelling here)
+   ========================= */
+setInterval(() => {
+  db.query(
+    `SELECT id, gopay_payment_id, date, hours, name, email, phone
+     FROM bookings
+     WHERE payment_status='pending'
+       AND gopay_payment_id IS NOT NULL
+       AND (expires_at IS NULL OR expires_at > NOW())
+     LIMIT 20`,
+    async (err, rows) => {
+      if (err) return console.error('❌ polling SELECT error:', err);
+      for (const row of rows) {
+        const payId = row.gopay_payment_id;
+        try {
+          const status = await gopayGetPayment(payId);
+          const state = status?.state?.id || status?.state;
+          if (state === 'PAID') {
+            await new Promise((resolve) => {
+              db.query(
+                `UPDATE bookings SET payment_status='paid', payment_paid_at=NOW(), payment_error=NULL WHERE id=?`,
+                [row.id],
+                (upErr) => {
+                  if (upErr) console.error('❌ polling UPDATE error:', upErr);
+                  resolve();
+                }
+              );
+            });
+            try {
+              const hours = safeParseHours(row.hours);
+              await sendConfirmationEmail({
+                name: row.name,
+                email: row.email,
+                date: row.date,
+                hours,
+                phone: row.phone,
+              });
+              console.log('✅ Polling: confirmed paid & emailed for booking id', row.id);
+            } catch (e) {
+              console.error('❌ Polling sendConfirmationEmail error:', e);
+            }
+          } else {
+            // Not PAID yet — do nothing; let 15-min expiry handle cancellations.
+            db.query(
+              `UPDATE bookings SET payment_error=? WHERE id=?`,
+              [JSON.stringify({ state }), row.id],
+              () => {}
+            );
+          }
+        } catch (e) {
+          console.error('❌ Polling gopayGetPayment error for', payId, e?.message || e);
+        }
+      }
+    }
+  );
+}, 30 * 1000);
 
 /* =========================
    Keepalive (24/7)
