@@ -191,7 +191,7 @@ app.post('/book', publicLimiter, async (req, res) => {
     const orderNo = `TZ-${Date.now()}`;
 
     // insert as pending, with 15-minute expiry
-    const expiresAt = new Date(Date.now() + 30 * 1000);
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
     const insertQuery = `
       INSERT INTO bookings (date, hours, name, email, phone, amount_czk, currency, payment_status, gopay_order_number, expires_at)
       VALUES (?, ?, ?, ?, ?, ?, 'CZK', 'pending', ?, ?)
@@ -406,7 +406,7 @@ setInterval(() => {
       });
     }
   );
-}, 10 * 1000); // run every minute
+}, 60 * 1000); // run every minute
 
 /* =========================
    Keepalive (24/7)
