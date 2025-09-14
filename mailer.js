@@ -2,7 +2,7 @@
 const { Resend } = require('resend');
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Helper: normalize any input (string/Date) to YYYY-MM-DD
+// Helper: normalize YYYY-MM-DD
 function formatYMD(d) {
   try {
     const dt = d instanceof Date ? d : new Date(d);
@@ -15,28 +15,22 @@ function formatYMD(d) {
     return String(d ?? '');
   }
 }
-
-// Helper: HH:MM (local)
 function formatTimeHM(d) {
   try {
     const dt = d instanceof Date ? d : new Date(d);
     if (Number.isNaN(dt.getTime())) return '';
     return dt.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
-  } catch {
-    return '';
-  }
+  } catch { return ''; }
 }
 
 async function sendMail({ to, subject, html }) {
   const from = 'TopZkušebny <info@topzkusebny.cz>';
-  // customer
   try {
     const r1 = await resend.emails.send({ from, to, subject, html, reply_to: 'info@topzkusebny.cz' });
     console.log('✅ [Resend] sent to customer:', r1?.id || r1);
   } catch (err) {
     console.error('❌ [Resend] send failed (customer):', err?.message || err);
   }
-  // internal copy
   try {
     const r2 = await resend.emails.send({ from, to: 'info@topzkusebny.cz', subject: `Kopie: ${subject}`, html, reply_to: 'info@topzkusebny.cz' });
     console.log('✅ [Resend] sent internal copy:', r2?.id || r2);
@@ -45,12 +39,11 @@ async function sendMail({ to, subject, html }) {
   }
 }
 
-/** A) PAYMENT REQUEST (new) */
+/** A) PAYMENT REQUEST */
 async function sendPaymentRequestEmail(booking) {
   const { name, email, date, hours, amount_czk, payment_url, expires_at } = booking;
   const dateLabel = formatYMD(date);
   const expiresLabel = formatTimeHM(expires_at);
-
   const subject = `Platba rezervace – ${dateLabel} (uhraďte do 15 minut)`;
   const html = `
     <h2>Zaplaťte prosím rezervaci</h2>
@@ -67,11 +60,11 @@ async function sendPaymentRequestEmail(booking) {
   await sendMail({ to: email, subject, html });
 }
 
-/** B) CONFIRMATION (already used; unchanged body, but reused for 'paid') */
+/** B) CONFIRMATION (uses booking.accessCode if provided) */
 async function sendConfirmationEmail(booking) {
-  const { name, email, date, hours, phone } = booking;
+  const { name, email, date, hours, phone, accessCode: overrideCode } = booking;
   const dateLabel = formatYMD(date);
-  const accessCode = process.env.ACCESS_CODE || '***KÓD NENASTAVEN***';
+  const accessCode = overrideCode || process.env.ACCESS_CODE || '***KÓD NENASTAVEN***';
 
   const subject = `Potvrzení rezervace – ${dateLabel}`;
   const html = `
@@ -89,7 +82,7 @@ async function sendConfirmationEmail(booking) {
   await sendMail({ to: email, subject, html });
 }
 
-/** C) CANCELLATION (already used) */
+/** C) CANCELLATION */
 async function sendCancellationEmail(booking, message) {
   const { name, email, date, hours, phone } = booking;
   const dateLabel = formatYMD(date);
@@ -110,7 +103,7 @@ async function sendCancellationEmail(booking, message) {
   await sendMail({ to: email, subject, html });
 }
 
-/** D) PAYMENT EXPIRED (new) */
+/** D) PAYMENT EXPIRED */
 async function sendPaymentExpiredEmail(booking) {
   const { email, date, hours } = booking;
   const dateLabel = formatYMD(date);
@@ -127,9 +120,7 @@ async function sendPaymentExpiredEmail(booking) {
   await sendMail({ to: email, subject, html });
 }
 
-// Default export kept for backward compatibility (confirmation):
 module.exports = sendConfirmationEmail;
-// Named exports:
 module.exports.sendPaymentRequestEmail = sendPaymentRequestEmail;
 module.exports.sendCancellationEmail = sendCancellationEmail;
 module.exports.sendPaymentExpiredEmail = sendPaymentExpiredEmail;
