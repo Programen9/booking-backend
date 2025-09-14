@@ -327,19 +327,36 @@ app.post('/bookings/:id/cancel', authMiddleware, (req, res) => {
 /* =========================
    GOPAY: webhook (payment status)
    ========================= */
-app.post('/gopay/webhook', async (req, res) => {
+// --- GoPay webhook: accept GET with ?id= and POST with JSON or form ---
+app.all('/gopay/webhook', express.urlencoded({ extended: false }), async (req, res) => {
   try {
-    const { id } = req.body || {};
-    if (!id) return res.status(400).json({ message: 'Missing payment id' });
+    // id can arrive as:
+    // - GET:   /gopay/webhook?id=123
+    // - POST JSON: { "id": 123 }
+    // - POST form: id=123
+    const id =
+      (req.query && (req.query.id || req.query.parent_id)) ||
+      (req.body && (req.body.id || req.body.parent_id));
 
-    // fetch payment status from GoPay
+    if (!id) {
+      // Log and 200 to avoid retries storms, but include message
+      console.warn('GoPay webhook hit without id', { method: req.method, query: req.query, body: req.body });
+      return res.status(200).json({ ok: true, note: 'missing id' });
+    }
+
+    // Fetch live status from GoPay
     const status = await gopayGetPayment(id);
-    // status.state might look like: { id: "PAID" | "CREATED" | "CANCELED" | ... }
-    const state = status?.state?.id || status?.state;
+    const state = status?.state?.id || status?.state; // e.g., "PAID", "CANCELED", "TIMEOUTED", etc.
 
     db.query('SELECT * FROM bookings WHERE gopay_payment_id = ?', [id], (err, results) => {
-      if (err) { console.error('❌ MySQL SELECT error:', err); return res.status(500).json({ message: 'DB error' }); }
-      if (!results || results.length === 0) return res.status(404).json({ message: 'Booking not found' });
+      if (err) {
+        console.error('❌ MySQL SELECT error:', err);
+        return res.status(200).json({ ok: true, note: 'db error' });
+      }
+      if (!results || results.length === 0) {
+        console.warn('Webhook payment not found in DB', { id });
+        return res.status(200).json({ ok: true, note: 'booking not found' });
+      }
 
       const row = results[0];
       const hours = safeParseHours(row.hours);
@@ -350,7 +367,6 @@ app.post('/gopay/webhook', async (req, res) => {
           [row.id],
           async (upErr) => {
             if (upErr) console.error('❌ MySQL UPDATE error:', upErr);
-            // send confirmation with access code
             try {
               await sendConfirmationEmail({
                 name: row.name,
@@ -362,23 +378,25 @@ app.post('/gopay/webhook', async (req, res) => {
             } catch (e) {
               console.error('❌ sendConfirmationEmail error:', e);
             }
-            return res.status(200).json({ ok: true });
+            return res.status(200).json({ ok: true, state: 'PAID' });
           }
         );
       } else if (state === 'CANCELED' || state === 'TIMEOUTED' || state === 'FAILED') {
-        // optional: free immediately
         db.query('DELETE FROM bookings WHERE id=?', [row.id], async (delErr) => {
           if (delErr) console.error('❌ MySQL DELETE error:', delErr);
           try { await sendPaymentExpiredEmail({ email: row.email, date: row.date, hours }); } catch {}
-          return res.status(200).json({ ok: true });
+          return res.status(200).json({ ok: true, state });
         });
       } else {
+        // Handle intermediate states gracefully
+        console.log('GoPay webhook intermediate state:', state, 'for payment', id);
         return res.status(200).json({ ok: true, state });
       }
     });
   } catch (e) {
     console.error('❌ webhook error:', e);
-    return res.status(500).json({ message: 'server error' });
+    // Always 200 to prevent repeated retries from gateway
+    return res.status(200).json({ ok: true });
   }
 });
 
