@@ -40,6 +40,14 @@ app.use(express.json());
 
 const db = require('./db');
 
+// --- Keepalive: ping MySQL every 5 minutes to prevent sleep ---
+setInterval(() => {
+  db.query('SELECT 1', (err) => {
+    if (err) console.error('🔄 DB keepalive error:', err.message || err);
+    else console.log('🔄 DB keepalive OK');
+  });
+}, 5 * 60 * 1000);
+
 function safeParseHours(val) {
   if (typeof val === 'string') {
     try { return JSON.parse(val); } catch { return []; }
