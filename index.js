@@ -66,15 +66,11 @@ async function getAccessCode() {
   return val || envDefault;
 }
 
-/* ------------------ GoPay helpers (sandbox) ------------------ */
-const GOPAY_MODE = process.env.GOPAY_MODE || 'sandbox';
-const GOPAY_BASE = GOPAY_MODE === 'production'
-  ? 'https://gw.gopay.com/api'
-  : 'https://gw.sandbox.gopay.com/api';
-
-const GOPAY_GOID = process.env.GOPAY_GOID || '8229333805';
-const GOPAY_CLIENT_ID = process.env.GOPAY_CLIENT_ID || '1785219876';
-const GOPAY_CLIENT_SECRET = process.env.GOPAY_CLIENT_SECRET || 'xZrM8MK6';
+// ------------------ GoPay configuration (production only) ------------------
+const GOPAY_BASE = 'https://gate.gopay.cz/api';
+const GOPAY_GOID = process.env.GOPAY_GOID;
+const GOPAY_CLIENT_ID = process.env.GOPAY_CLIENT_ID;
+const GOPAY_CLIENT_SECRET = process.env.GOPAY_CLIENT_SECRET;
 
 // OAuth2 token
 async function gopayToken() {
