@@ -453,31 +453,27 @@ setInterval(() => {
 }, 60 * 1000);
 
 /* =========================
-   POLLING: confirm paid bookings every 30s (no cancelling)
+   MANUAL CONFIRM ENDPOINT (GoPay-compliant)
    ========================= */
-setInterval(() => {
-  db.query(
-    `SELECT id, gopay_payment_id, date, hours, name, email, phone
-     FROM bookings
-     WHERE payment_status='pending'
-       AND gopay_payment_id IS NOT NULL
-       AND (expires_at IS NULL OR expires_at > NOW())
-     LIMIT 20`,
-    async (err, rows) => {
-      if (err) return console.error('❌ polling SELECT error:', err);
-      for (const row of rows) {
-        const payId = row.gopay_payment_id;
-        try {
-          const status = await gopayGetPayment(payId);
-          const state = status?.state?.id || status?.state;
-          if (state === 'PAID') {
-            await new Promise((resolve) => {
-              db.query(
-                `UPDATE bookings SET payment_status='paid', payment_paid_at=NOW(), payment_error=NULL WHERE id=?`,
-                [row.id],
-                (upErr) => { if (upErr) console.error('❌ polling UPDATE error:', upErr); resolve(); }
-              );
-            });
+app.get('/confirm/:id', async (req, res) => {
+  const bookingId = req.params.id;
+  db.query('SELECT * FROM bookings WHERE id = ?', [bookingId], async (err, rows) => {
+    if (err) return res.status(500).json({ message: 'DB error' });
+    if (!rows || rows.length === 0) return res.status(404).json({ message: 'Booking not found' });
+
+    const row = rows[0];
+    if (!row.gopay_payment_id) return res.status(400).json({ message: 'No payment linked' });
+
+    try {
+      const status = await gopayGetPayment(row.gopay_payment_id);
+      const state = status?.state?.id || status?.state;
+
+      if (state === 'PAID') {
+        db.query(
+          `UPDATE bookings SET payment_status='paid', payment_paid_at=NOW(), payment_error=NULL WHERE id=?`,
+          [row.id],
+          async (upErr) => {
+            if (upErr) console.error('❌ confirm UPDATE error:', upErr);
             try {
               const hours = safeParseHours(row.hours);
               const accessCode = await getAccessCode();
@@ -485,24 +481,21 @@ setInterval(() => {
                 name: row.name, email: row.email, date: row.date, hours, phone: row.phone,
                 accessCode
               });
-              console.log('✅ Polling: confirmed paid & emailed for booking id', row.id);
             } catch (e) {
-              console.error('❌ Polling sendConfirmationEmail error:', e);
+              console.error('❌ confirm sendConfirmationEmail error:', e);
             }
-          } else {
-            db.query(
-              `UPDATE bookings SET payment_error=? WHERE id=?`,
-              [JSON.stringify({ state }), row.id],
-              () => {}
-            );
+            return res.json({ ok: true, state: 'PAID' });
           }
-        } catch (e) {
-          console.error('❌ Polling gopayGetPayment error for', payId, e?.message || e);
-        }
+        );
+      } else {
+        return res.json({ ok: true, state });
       }
+    } catch (e) {
+      console.error('❌ confirm error:', e);
+      return res.status(500).json({ message: 'Error checking payment', error: e.message });
     }
-  );
-}, 30 * 1000);
+  });
+});
 
 /* =========================
    Keepalive (24/7)
