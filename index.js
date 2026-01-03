@@ -144,6 +144,23 @@ async function gopayGetPayment(id) {
 
 /* ------------------ Utilities ------------------ */
 
+const { parsePhoneNumberFromString } = require('libphonenumber-js');
+
+function normalizeAndValidatePhoneE164(input) {
+  const raw = String(input || '').trim();
+
+  // rychlá kontrola formátu, ať sem nelítá bordel
+  if (!raw.startsWith('+')) return null;
+
+  const phone = parsePhoneNumberFromString(raw);
+  if (!phone) return null;
+
+  if (!phone.isValid()) return null;
+
+  // vždy vrátí E.164: +420777123456
+  return phone.number;
+}
+
 function reserveSmsSend(bookingId) {
   return new Promise((resolve) => {
     db.query(
@@ -171,10 +188,19 @@ function safeParseHours(val) {
 app.post('/book', publicLimiter, async (req, res) => {
   const newBooking = req.body;
 
+  if (!newBooking || typeof newBooking !== 'object') {
+    return res.status(400).json({ message: 'Neplatný request.' });
+  }
+
   // sanitize
   newBooking.name  = sanitizeHtml(newBooking.name,  { allowedTags: [], allowedAttributes: {} });
   newBooking.email = sanitizeHtml(newBooking.email, { allowedTags: [], allowedAttributes: {} });
-  newBooking.phone = sanitizeHtml(newBooking.phone, { allowedTags: [], allowedAttributes: {} });
+  newBooking.phone = sanitizeHtml(String(newBooking.phone || ''), { allowedTags: [], allowedAttributes: {} });
+  const phoneE164 = normalizeAndValidatePhoneE164(newBooking.phone);
+  if (!phoneE164) {
+    return res.status(400).json({ message: 'Neplatné telefonní číslo. Použijte mezinárodní formát, např. +420777123456' });
+  }
+  newBooking.phone = phoneE164;
 
   // reCAPTCHA
   const token = newBooking.token;
@@ -202,6 +228,10 @@ app.post('/book', publicLimiter, async (req, res) => {
   const bookingDate = new Date(newBooking.date);
   const today = new Date(); today.setHours(0,0,0,0);
   if (bookingDate < today) return res.status(400).json({ message: 'Nelze rezervovat zpětně.' });
+
+  if (!Array.isArray(newBooking.hours) || newBooking.hours.length === 0) {
+    return res.status(400).json({ message: 'Chybí hodiny rezervace.' });
+  }
 
   // conflict check
   const checkQuery = `

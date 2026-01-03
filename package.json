@@ -14,6 +14,7 @@
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "express-rate-limit": "^8.0.1",
+    "libphonenumber-js": "^1.12.33",
     "mysql2": "^3.14.1",
     "resend": "^4.6.0",
     "sanitize-html": "^2.17.0"
