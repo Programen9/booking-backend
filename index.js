@@ -43,6 +43,8 @@ app.use(express.json());
 
 const db = require('./db');
 
+const { sendSmsDemo } = require('./sms');
+
 /* ------------------ Settings helpers ------------------ */
 async function getSetting(key, fallback) {
   return new Promise((resolve) => {
@@ -141,6 +143,23 @@ async function gopayGetPayment(id) {
 }
 
 /* ------------------ Utilities ------------------ */
+
+function reserveSmsSend(bookingId) {
+  return new Promise((resolve) => {
+    db.query(
+      `UPDATE bookings
+       SET sms_status='pending'
+       WHERE id=? AND (sms_status IS NULL OR sms_status!='sent')`,
+      [bookingId],
+      (err, result) => {
+        if (err) return resolve({ ok: false, reason: 'db_error', err });
+        // affectedRows 1 = máme rezervováno, 0 = už bylo sent nebo pending, nic nedělej
+        resolve({ ok: result.affectedRows === 1 });
+      }
+    );
+  });
+}
+
 function safeParseHours(val) {
   if (typeof val === 'string') { try { return JSON.parse(val); } catch { return []; } }
   return Array.isArray(val) ? val : [];
@@ -409,6 +428,36 @@ app.all('/gopay/webhook', express.urlencoded({ extended: false }), async (req, r
                 accessCode
               });
             } catch (e) { console.error('❌ sendConfirmationEmail error:', e); }
+            // --- SMS (demo) - send only once ---
+            try {
+              const lock = await reserveSmsSend(row.id);
+              if (!lock.ok) {
+                console.log('📩 SMS skipped (already sent or reserved) for booking id', row.id);
+              } else {
+                const hoursText = (hours || []).join(', ');
+                const smsText = `TopZkusebny: Zaplaceno. ${row.date} ${hoursText}. Kod: ${(await getAccessCode())}`;
+
+                const smsRes = await sendSmsDemo({
+                  to: row.phone || '',
+                  body: smsText,
+                });
+
+                db.query(
+                  `UPDATE bookings SET sms_status='sent', sms_sent_at=NOW(), sms_message_sid=?, sms_error=NULL WHERE id=?`,
+                  [smsRes.sid || 'demo', row.id],
+                  () => {}
+                );
+
+                console.log('✅ SMS DEMO sent for booking id', row.id, 'sid=', smsRes.sid);
+              }
+            } catch (e) {
+              console.error('❌ SMS DEMO failed:', e?.message || e);
+              db.query(
+                `UPDATE bookings SET sms_status='failed', sms_error=? WHERE id=?`,
+                [String(e?.message || e), row.id],
+                () => {}
+              );
+            }
             return res.status(200).json({ ok: true, state: 'PAID' });
           }
         );
