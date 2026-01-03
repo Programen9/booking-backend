@@ -43,7 +43,7 @@ app.use(express.json());
 
 const db = require('./db');
 
-const { sendSmsDemo } = require('./sms');
+const { sendSms } = require('./sms');
 
 /* ------------------ Settings helpers ------------------ */
 async function getSetting(key, fallback) {
@@ -467,7 +467,7 @@ app.all('/gopay/webhook', express.urlencoded({ extended: false }), async (req, r
                 const hoursText = (hours || []).join(', ');
                 const smsText = `TopZkusebny: Zaplaceno. ${row.date} ${hoursText}. Kod: ${(await getAccessCode())}`;
 
-                const smsRes = await sendSmsDemo({
+                const smsRes = await sendSms({
                   to: row.phone || '',
                   body: smsText,
                 });
@@ -478,7 +478,7 @@ app.all('/gopay/webhook', express.urlencoded({ extended: false }), async (req, r
                   () => {}
                 );
 
-                console.log('✅ SMS DEMO sent for booking id', row.id, 'sid=', smsRes.sid);
+                console.log('✅ SMS sent for booking id', row.id, 'sid=', smsRes.sid, 'status=', smsRes.status);
               }
             } catch (e) {
               console.error('❌ SMS DEMO failed:', e?.message || e);

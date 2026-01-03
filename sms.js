@@ -1,27 +1,38 @@
 // sms.js
-async function sendSmsDemo({ to, body }) {
-  const DEMO_URL = process.env.TWILIO_DEMO_WEBHOOK_URL || 'https://demo.twilio.com/welcome/sms/reply/';
+const twilio = require('twilio');
 
-  // Twilio obvykle posílá form-urlencoded, tak uděláme totéž
-  const form = new URLSearchParams({
-    To: to,
-    From: 'TopZkusebnyDemo',
-    Body: body,
-  });
+function getClient() {
+  const sid = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
 
-  const r = await fetch(DEMO_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: form.toString(),
-  });
-
-  const text = await r.text().catch(() => '');
-  if (!r.ok) {
-    throw new Error(`Twilio demo webhook returned ${r.status}: ${text}`);
+  if (!sid || !token) {
+    throw new Error('Missing TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN');
   }
-
-  // V demo režimu nemáme SID, tak vracíme fake
-  return { sid: 'demo', raw: text };
+  return twilio(sid, token);
 }
 
-module.exports = { sendSmsDemo };
+async function sendSms({ to, body }) {
+  const client = getClient();
+
+  const from = process.env.TWILIO_FROM;
+  const messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID;
+
+  if (!to || !String(to).startsWith('+')) {
+    throw new Error(`Invalid "to" (must be E.164): ${to}`);
+  }
+
+  if (!messagingServiceSid && !from) {
+    throw new Error('Set TWILIO_MESSAGING_SERVICE_SID or TWILIO_FROM');
+  }
+
+  const payload = {
+    to,
+    body,
+    ...(messagingServiceSid ? { messagingServiceSid } : { from }),
+  };
+
+  const msg = await client.messages.create(payload);
+  return { sid: msg.sid, status: msg.status };
+}
+
+module.exports = { sendSms };
