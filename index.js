@@ -144,6 +144,90 @@ async function gopayGetPayment(id) {
 
 /* ------------------ Utilities ------------------ */
 
+function stripDiacritics(str) {
+  return String(str || '')
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')   // odstraní diakritiku
+    .replace(/\s+/g, ' ')             // sjednotí mezery
+    .trim();
+}
+
+function formatDateCZ(dateLike) {
+  // DB může vracet Date nebo string; chceme Praha timezone
+  const d = dateLike instanceof Date ? dateLike : new Date(dateLike);
+  if (Number.isNaN(d.getTime())) return '';
+
+  // cs-CZ dá "5. 1. 2026" (s mezerama) -> zbavíme se mezer
+  const s = d.toLocaleDateString('cs-CZ', {
+    timeZone: 'Europe/Prague',
+    day: 'numeric',
+    month: 'numeric',
+    year: 'numeric',
+  });
+
+  return s.replace(/\s/g, ''); // "5.1.2026"
+}
+
+function parseTimeToMinutes(t) {
+  const m = String(t || '').match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+  return hh * 60 + mm;
+}
+
+function minutesToTime(min) {
+  const hh = String(Math.floor(min / 60)).padStart(2, '0');
+  const mm = String(min % 60).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+function normalizeHoursToRanges(hoursArr) {
+  // očekáváme např. ["20:00–21:00","21:00–22:00"] nebo s "-"
+  const slots = (Array.isArray(hoursArr) ? hoursArr : [])
+    .map(s => String(s || '').trim().replace('–', '-'))
+    .map(s => {
+      const [a, b] = s.split('-').map(x => x && x.trim());
+      const start = parseTimeToMinutes(a);
+      const end = parseTimeToMinutes(b);
+      if (start == null || end == null) return null;
+      return { start, end };
+    })
+    .filter(Boolean)
+    .sort((x, y) => x.start - y.start);
+
+  if (slots.length === 0) return '';
+
+  // sloučíme sousedící sloty (end === next.start)
+  const merged = [];
+  for (const slot of slots) {
+    const last = merged[merged.length - 1];
+    if (!last) {
+      merged.push({ ...slot });
+      continue;
+    }
+    if (last.end === slot.start) {
+      last.end = slot.end;
+    } else {
+      merged.push({ ...slot });
+    }
+  }
+
+  // výstup: "20:00-22:00" nebo "10:00-11:00,13:00-14:00"
+  return merged.map(r => `${minutesToTime(r.start)}-${minutesToTime(r.end)}`).join(',');
+}
+
+function buildPaidSmsText({ name, date, hours, accessCode }) {
+  const cleanName = stripDiacritics(name);
+  const d = formatDateCZ(date);
+  const timeRanges = normalizeHoursToRanges(hours);
+
+  // držíme diacritics-safe text (bez háčků/čárek) a bez em dash
+  return `TopZkusebny.cz | Rezervace zaplacena | ${cleanName} - ${d} - ${timeRanges} | Pristupovy kod do zkusebny: ${accessCode}`;
+}
+
 const { parsePhoneNumberFromString } = require('libphonenumber-js');
 
 function normalizeAndValidatePhoneE164(input) {
@@ -421,6 +505,22 @@ app.put('/admin/settings', authMiddleware, async (req, res) => {
   res.json({ ok: true });
 });
 
+app.post('/admin/sms/preview', authMiddleware, (req, res) => {
+  const { name, date, hours, accessCode } = req.body || {};
+  const smsText = buildPaidSmsText({
+    name,
+    date,
+    hours,
+    accessCode: accessCode || '3141',
+  });
+
+  res.json({
+    smsText,
+    length: smsText.length,
+    segmentsApprox: smsText.length <= 160 ? 1 : (smsText.length <= 306 ? 2 : 3),
+  });
+});
+
 /* =========================
    GOPAY: webhook (no auto-cancel on non-PAID)
    ========================= */
@@ -464,8 +564,13 @@ app.all('/gopay/webhook', express.urlencoded({ extended: false }), async (req, r
               if (!lock.ok) {
                 console.log('📩 SMS skipped (already sent or reserved) for booking id', row.id);
               } else {
-                const hoursText = (hours || []).join(', ');
-                const smsText = `TopZkusebny: Zaplaceno. ${row.date} ${hoursText}. Kod: ${(await getAccessCode())}`;
+                const accessCode = await getAccessCode();
+                const smsText = buildPaidSmsText({
+                  name: row.name,
+                  date: row.date,
+                  hours,
+                  accessCode,
+                });
 
                 const smsRes = await sendSms({
                   to: row.phone || '',
