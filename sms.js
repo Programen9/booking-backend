@@ -14,8 +14,6 @@ function getClient() {
 async function sendSms({ to, body }) {
   const client = getClient();
 
-  const client = getClient();
-
   const messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID;
   const from = process.env.TWILIO_FROM;
 
@@ -43,7 +41,6 @@ async function sendSms({ to, body }) {
     body,
     from,
   });
-  return { sid: msg.sid, status: msg.status };
   return { sid: msg.sid, status: msg.status };
 }
 
