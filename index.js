@@ -147,7 +147,7 @@ async function gopayGetPayment(id) {
 function stripDiacritics(str) {
   return String(str || '')
     .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')   // odstraní diakritiku
+    .replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, ' ')             // sjednotí mezery
     .trim();
 }
@@ -187,7 +187,7 @@ function minutesToTime(min) {
 function normalizeHoursToRanges(hoursArr) {
   // očekáváme např. ["20:00–21:00","21:00–22:00"] nebo s "-"
   const slots = (Array.isArray(hoursArr) ? hoursArr : [])
-    .map(s => String(s || '').trim().replace('–', '-'))
+    .map(s => String(s || '').trim().replace(/–/g, '-'))
     .map(s => {
       const [a, b] = s.split('-').map(x => x && x.trim());
       const start = parseTimeToMinutes(a);
@@ -216,7 +216,7 @@ function normalizeHoursToRanges(hoursArr) {
   }
 
   // výstup: "20:00-22:00" nebo "10:00-11:00,13:00-14:00"
-  return merged.map(r => `${minutesToTime(r.start)}-${minutesToTime(r.end)}`).join(',');
+  return merged.map(r => `${minutesToTime(r.start)}-${minutesToTime(r.end)}`).join(', ');
 }
 
 function buildPaidSmsText({ name, date, hours, accessCode }) {
@@ -521,6 +521,43 @@ app.post('/admin/sms/preview', authMiddleware, (req, res) => {
   });
 });
 
+app.post('/admin/sms/send-test', authMiddleware, async (req, res) => {
+  try {
+    const { to, name, date, hours, accessCode } = req.body || {};
+
+    if (!to) {
+      return res.status(400).json({ message: 'Chybi "to" (telefon v E.164, napr. +420777123456).' });
+    }
+
+    const toE164 = normalizeAndValidatePhoneE164(to);
+    if (!toE164) {
+      return res.status(400).json({ message: 'Neplatne "to". Pouzij E.164, napr. +420777123456.' });
+    }
+
+    const code = accessCode || (await getAccessCode());
+
+    const smsText = buildPaidSmsText({
+      name: name || 'Test User',
+      date: date || new Date(),
+      hours: Array.isArray(hours) && hours.length ? hours : ['20:00-21:00', '21:00-22:00'],
+      accessCode: code,
+    });
+
+    const smsRes = await sendSms({ to: toE164, body: smsText });
+
+    return res.json({
+      ok: true,
+      to: toE164,
+      body: smsText,
+      sid: smsRes.sid,
+      status: smsRes.status,
+    });
+  } catch (e) {
+    console.error('❌ /admin/sms/send-test error:', e);
+    return res.status(500).json({ ok: false, message: 'SMS send failed', error: String(e?.message || e) });
+  }
+});
+
 /* =========================
    GOPAY: webhook (no auto-cancel on non-PAID)
    ========================= */
@@ -586,7 +623,7 @@ app.all('/gopay/webhook', express.urlencoded({ extended: false }), async (req, r
                 console.log('✅ SMS sent for booking id', row.id, 'sid=', smsRes.sid, 'status=', smsRes.status);
               }
             } catch (e) {
-              console.error('❌ SMS DEMO failed:', e?.message || e);
+              console.error('❌ SMS failed:', e?.message || e);
               db.query(
                 `UPDATE bookings SET sms_status='failed', sms_error=? WHERE id=?`,
                 [String(e?.message || e), row.id],
