@@ -228,6 +228,15 @@ function buildPaidSmsText({ name, date, hours, accessCode }) {
   return `TopZkusebny.cz | Rezervace zaplacena | ${cleanName} - ${d} - ${timeRanges} | Pristupovy kod do zkusebny: ${accessCode}`;
 }
 
+function buildReceptionSmsText({ name, date, hours }) {
+  const cleanName = stripDiacritics(name);
+  const d = formatDateCZ(date);
+  const timeRanges = normalizeHoursToRanges(hours);
+
+  // format: 5.1.2026 | 20:00-22:00 | Vaclav Rychtarik
+  return `${d} | ${timeRanges} | ${cleanName}`;
+}
+
 const { parsePhoneNumberFromString } = require('libphonenumber-js');
 
 function normalizeAndValidatePhoneE164(input) {
@@ -602,25 +611,53 @@ app.all('/gopay/webhook', express.urlencoded({ extended: false }), async (req, r
                 console.log('📩 SMS skipped (already sent or reserved) for booking id', row.id);
               } else {
                 const accessCode = await getAccessCode();
-                const smsText = buildPaidSmsText({
+
+                // 1) SMS pro uživatele (stejná jako doteď)
+                const smsTextUser = buildPaidSmsText({
                   name: row.name,
                   date: row.date,
                   hours,
                   accessCode,
                 });
 
-                const smsRes = await sendSms({
+                const smsResUser = await sendSms({
                   to: row.phone || '',
-                  body: smsText,
+                  body: smsTextUser,
                 });
 
+                // 2) SMS pro recepci (kratká)
+                try {
+                  const receptionRaw = process.env.RECEPTION_PHONE_E164 || '+420705926425';
+                  const receptionTo = normalizeAndValidatePhoneE164(receptionRaw);
+
+                  if (!receptionTo) {
+                    console.error('❌ Invalid RECEPTION_PHONE_E164:', receptionRaw, 'booking id=', row.id);
+                  } else {
+                    const smsTextReception = buildReceptionSmsText({
+                      name: row.name,
+                      date: row.date,
+                      hours,
+                    });
+
+                    const smsResReception = await sendSms({
+                      to: receptionTo,
+                      body: smsTextReception,
+                    });
+
+                    console.log('✅ Reception SMS sent for booking id', row.id, 'sid=', smsResReception.sid, 'status=', smsResReception.status);
+                  }
+                } catch (e) {
+                  console.error('❌ Reception SMS failed:', e?.message || e, 'booking id=', row.id);
+                }
+
+                // DB status držíme podle uživatelské SMS
                 db.query(
                   `UPDATE bookings SET sms_status='sent', sms_sent_at=NOW(), sms_message_sid=?, sms_error=NULL WHERE id=?`,
-                  [smsRes.sid || 'demo', row.id],
+                  [smsResUser.sid || 'demo', row.id],
                   () => {}
                 );
 
-                console.log('✅ SMS sent for booking id', row.id, 'sid=', smsRes.sid, 'status=', smsRes.status);
+                console.log('✅ User SMS sent for booking id', row.id, 'sid=', smsResUser.sid, 'status=', smsResUser.status);
               }
             } catch (e) {
               console.error('❌ SMS failed:', e?.message || e);
