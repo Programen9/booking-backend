@@ -33,18 +33,36 @@ const publicLimiter = rateLimit({
   message: { message: 'Too many requests from this IP. Please try again later.' },
 });
 
-app.use(cors({
+const corsOptions = {
   origin: (origin, cb) => {
     if (!origin) return cb(null, true);
+
     const allowed = [
       'http://localhost:5173',
-      'https://topzkusebny-booking-frontend.netlify.app'
+      'https://topzkusebny-booking-frontend.netlify.app',
+      'https://topzkusebny.cz',
+      'https://www.topzkusebny.cz',
+      // 'https://tvoje-admin-domena.netlify.app',
     ];
+
     if (allowed.includes(origin)) return cb(null, true);
     return cb(new Error('CORS not allowed from this origin'), false);
   },
-  credentials: true
-}));
+
+  credentials: true,
+
+  allowedHeaders: [
+    'Content-Type',
+    'X-Admin-Password',
+    'x-admin-password',
+    'Authorization'
+  ],
+
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 app.use(express.json());
 
