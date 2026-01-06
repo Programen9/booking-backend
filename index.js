@@ -298,8 +298,26 @@ function reserveSmsSend(bookingId) {
 }
 
 function safeParseHours(val) {
-  if (typeof val === 'string') { try { return JSON.parse(val); } catch { return []; } }
-  return Array.isArray(val) ? val : [];
+  let arr = [];
+
+  if (typeof val === 'string') {
+    try {
+      const parsed = JSON.parse(val);
+      arr = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      arr = [];
+    }
+  } else if (Array.isArray(val)) {
+    arr = val;
+  } else {
+    arr = [];
+  }
+
+  // IMPORTANT: vždy vrátit jen validní stringy
+  return arr
+    .filter((h) => typeof h === 'string')
+    .map((h) => h.trim())
+    .filter((h) => h.length > 0);
 }
 
 /* =========================
