@@ -319,11 +319,21 @@ function safeParseHours(val) {
   let arr = [];
 
   if (typeof val === 'string') {
-    try {
-      const parsed = JSON.parse(val);
-      arr = Array.isArray(parsed) ? parsed : [];
-    } catch {
+    const s = val.trim();
+
+    // časté "divné" hodnoty
+    if (!s || s === 'null' || s === 'undefined') {
       arr = [];
+    } else {
+      try {
+        const parsed = JSON.parse(s);
+        arr = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        // když to není JSON array, zkusíme fallback:
+        // - buď jeden slot jako string
+        // - nebo nic
+        arr = [];
+      }
     }
   } else if (Array.isArray(val)) {
     arr = val;
@@ -331,11 +341,16 @@ function safeParseHours(val) {
     arr = [];
   }
 
-  // IMPORTANT: vždy vrátit jen validní stringy
-  return arr
+  arr = arr
     .filter((h) => typeof h === 'string')
-    .map((h) => h.trim())
+    .map((h) => h.trim().replace(/–/g, '-'))
     .filter((h) => h.length > 0);
+
+  // POSLEDNÍ záchrana: aby FE nikdy nesplitovala undefined
+  // (radši placeholder než crash)
+  if (arr.length === 0) return ['00:00-00:00'];
+
+  return arr;
 }
 
 /* =========================
@@ -553,17 +568,27 @@ app.get('/bookings/:date', publicLimiter, (req, res) => {
 app.get('/all-bookings', authMiddleware, (req, res) => {
   db.query('SELECT * FROM bookings', (err, results) => {
     if (err) { console.error('❌ MySQL query error:', err); return res.status(500).json({ message: 'Server error' }); }
-    const bookings = results.map((row) => ({
-      id: row.id,
-      date: row.date,
-      hours: safeParseHours(row.hours),
-      name: row.name,
-      email: row.email,
-      phone: row.phone,
-      payment_status: row.payment_status,
-      amount_czk: row.amount_czk,
-      expires_at: row.expires_at
-    }));
+
+    const bookings = results.map((row) => {
+      const hoursArr = safeParseHours(row.hours);
+
+      // fallback text, aby FE nemusela nic splitovat
+      const hoursText = normalizeHoursToRanges(hoursArr);
+
+      return {
+        id: row.id,
+        date: row.date,
+        hours: hoursArr,                 // vždy array
+        hours_text: hoursText || '',      // vždy string
+        name: row.name,
+        email: row.email,
+        phone: row.phone,
+        payment_status: row.payment_status,
+        amount_czk: row.amount_czk,
+        expires_at: row.expires_at
+      };
+    });
+
     res.json(bookings);
   });
 });
