@@ -1,7 +1,8 @@
 // index.js
 
-const fetch = (...args) =>
-  import('node-fetch').then(({ default: fetch }) => fetch(...args));
+if (typeof fetch !== 'function') {
+  throw new Error('Global fetch is not available. Use Node 18+ or add node-fetch dependency.');
+}
 
 const { URLSearchParams } = require('url');
 
