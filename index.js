@@ -586,6 +586,7 @@ app.get('/all-bookings', authMiddleware, (req, res) => {
         payment_status: row.payment_status,
         amount_czk: row.amount_czk,
         expires_at: row.expires_at
+        expiresAt: row.expires_at
       };
     });
 
