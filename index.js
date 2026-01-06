@@ -1,20 +1,13 @@
 // index.js
-
-if (typeof fetch !== 'function') {
-  throw new Error('Global fetch is not available. Use Node 18+ or add node-fetch dependency.');
-}
-
-const { URLSearchParams } = require('url');
+require('./db');
 
 const authMiddleware = require('./authMiddleware');
-const mailer = require('./mailer'); // default export + named exports
-
-const sendConfirmationEmail = mailer;
+const sendConfirmationEmail = require('./mailer'); // default export
 const {
   sendPaymentRequestEmail,
   sendCancellationEmail,
   sendPaymentExpiredEmail,
-} = mailer;
+} = require('./mailer');
 
 const express = require('express');
 const app = express();
@@ -33,36 +26,18 @@ const publicLimiter = rateLimit({
   message: { message: 'Too many requests from this IP. Please try again later.' },
 });
 
-const corsOptions = {
+app.use(cors({
   origin: (origin, cb) => {
     if (!origin) return cb(null, true);
-
     const allowed = [
       'http://localhost:5173',
-      'https://topzkusebny-booking-frontend.netlify.app',
-      'https://topzkusebny.cz',
-      'https://www.topzkusebny.cz',
-      // 'https://tvoje-admin-domena.netlify.app',
+      'https://topzkusebny-booking-frontend.netlify.app'
     ];
-
     if (allowed.includes(origin)) return cb(null, true);
     return cb(new Error('CORS not allowed from this origin'), false);
   },
-
-  credentials: true,
-
-  allowedHeaders: [
-    'Content-Type',
-    'X-Admin-Password',
-    'x-admin-password',
-    'Authorization'
-  ],
-
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-};
-
-app.use(cors(corsOptions));
-app.options(/.*/, cors(corsOptions));
+  credentials: true
+}));
 
 app.use(express.json());
 
@@ -99,10 +74,6 @@ const GOPAY_GOID = process.env.GOPAY_GOID;
 const GOPAY_CLIENT_ID = process.env.GOPAY_CLIENT_ID;
 const GOPAY_CLIENT_SECRET = process.env.GOPAY_CLIENT_SECRET;
 
-if (!GOPAY_GOID || !GOPAY_CLIENT_ID || !GOPAY_CLIENT_SECRET) {
-  console.warn('⚠️ GoPay env missing. Check GOPAY_GOID, GOPAY_CLIENT_ID, GOPAY_CLIENT_SECRET.');
-}
-
 // OAuth2 token
 async function gopayToken() {
   const body = new URLSearchParams({
@@ -118,7 +89,7 @@ async function gopayToken() {
       'Authorization': `Basic ${auth}`,
       'Content-Type': 'application/x-www-form-urlencoded'
     },
-    body: body.toString()
+    body
   });
 
   if (!r.ok) {
@@ -134,7 +105,7 @@ async function gopayCreatePayment({ amount_czk, order_number, name, email, retur
 
   const payload = {
     target: { goid: Number(GOPAY_GOID), type: 'ACCOUNT' },
-    amount: Math.round(Number(amount_czk) * 100), // minor units (integer)
+    amount: amount_czk * 100, // minor units
     currency: 'CZK',
     order_number,
     lang: 'cs',
@@ -195,21 +166,6 @@ function formatDateCZ(dateLike) {
   });
 
   return s.replace(/\s/g, ''); // "5.1.2026"
-}
-
-function todayPragueYYYYMMDD() {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Prague',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).formatToParts(new Date());
-
-  const y = parts.find(p => p.type === 'year')?.value;
-  const m = parts.find(p => p.type === 'month')?.value;
-  const d = parts.find(p => p.type === 'day')?.value;
-
-  return `${y}-${m}-${d}`; // YYYY-MM-DD
 }
 
 function parseTimeToMinutes(t) {
@@ -303,12 +259,11 @@ function reserveSmsSend(bookingId) {
     db.query(
       `UPDATE bookings
        SET sms_status='pending'
-       WHERE id=?
-         AND (sms_status IS NULL OR sms_status='failed')`,
+       WHERE id=? AND (sms_status IS NULL OR sms_status!='sent')`,
       [bookingId],
       (err, result) => {
         if (err) return resolve({ ok: false, reason: 'db_error', err });
-        // affectedRows 1 = rezervováno, 0 = už pending nebo sent, nic nedělej
+        // affectedRows 1 = máme rezervováno, 0 = už bylo sent nebo pending, nic nedělej
         resolve({ ok: result.affectedRows === 1 });
       }
     );
@@ -316,41 +271,8 @@ function reserveSmsSend(bookingId) {
 }
 
 function safeParseHours(val) {
-  let arr = [];
-
-  if (typeof val === 'string') {
-    const s = val.trim();
-
-    // časté "divné" hodnoty
-    if (!s || s === 'null' || s === 'undefined') {
-      arr = [];
-    } else {
-      try {
-        const parsed = JSON.parse(s);
-        arr = Array.isArray(parsed) ? parsed : [];
-      } catch {
-        // když to není JSON array, zkusíme fallback:
-        // - buď jeden slot jako string
-        // - nebo nic
-        arr = [];
-      }
-    }
-  } else if (Array.isArray(val)) {
-    arr = val;
-  } else {
-    arr = [];
-  }
-
-  arr = arr
-    .filter((h) => typeof h === 'string')
-    .map((h) => h.trim().replace(/–/g, '-'))
-    .filter((h) => h.length > 0);
-
-  // POSLEDNÍ záchrana: aby FE nikdy nesplitovala undefined
-  // (radši placeholder než crash)
-  if (arr.length === 0) return ['00:00-00:00'];
-
-  return arr;
+  if (typeof val === 'string') { try { return JSON.parse(val); } catch { return []; } }
+  return Array.isArray(val) ? val : [];
 }
 
 /* =========================
@@ -364,22 +286,14 @@ app.post('/book', publicLimiter, async (req, res) => {
   }
 
   // sanitize
-  newBooking.name  = sanitizeHtml(String(newBooking.name || ''),  { allowedTags: [], allowedAttributes: {} });
-  newBooking.email = sanitizeHtml(String(newBooking.email || ''), { allowedTags: [], allowedAttributes: {} });
+  newBooking.name  = sanitizeHtml(newBooking.name,  { allowedTags: [], allowedAttributes: {} });
+  newBooking.email = sanitizeHtml(newBooking.email, { allowedTags: [], allowedAttributes: {} });
   newBooking.phone = sanitizeHtml(String(newBooking.phone || ''), { allowedTags: [], allowedAttributes: {} });
-
   const phoneE164 = normalizeAndValidatePhoneE164(newBooking.phone);
   if (!phoneE164) {
     return res.status(400).json({ message: 'Neplatné telefonní číslo. Použijte mezinárodní formát, např. +420777123456' });
   }
   newBooking.phone = phoneE164;
-
-  if (!newBooking.name) {
-    return res.status(400).json({ message: 'Chybí jméno.' });
-  }
-  if (!newBooking.email) {
-    return res.status(400).json({ message: 'Chybí email.' });
-  }
 
   // reCAPTCHA
   const token = newBooking.token;
@@ -403,47 +317,22 @@ app.post('/book', publicLimiter, async (req, res) => {
     return res.status(500).json({ message: 'Chyba při ověřování reCAPTCHA.' });
   }
 
-  // no past bookings (compare in Prague local day)
-  const dateStr = String(newBooking.date || '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-    return res.status(400).json({ message: 'Neplatné datum. Použij YYYY-MM-DD.' });
-  }
-
-  const todayPrg = todayPragueYYYYMMDD();
-  if (dateStr < todayPrg) {
-    return res.status(400).json({ message: 'Nelze rezervovat zpětně.' });
-  }
+  // no past bookings
+  const bookingDate = new Date(newBooking.date);
+  const today = new Date(); today.setHours(0,0,0,0);
+  if (bookingDate < today) return res.status(400).json({ message: 'Nelze rezervovat zpětně.' });
 
   if (!Array.isArray(newBooking.hours) || newBooking.hours.length === 0) {
     return res.status(400).json({ message: 'Chybí hodiny rezervace.' });
   }
 
-  // normalize hours to always store with "-"
-  newBooking.hours = newBooking.hours.map(h => String(h || '').trim().replace(/–/g, '-'));
-
-  // conflict check (handle both "-" and "–" stored in DB)
-  const conds = newBooking.hours
-    .map(() => `(JSON_CONTAINS(hours, ?, '$') OR JSON_CONTAINS(hours, ?, '$'))`)
-    .join(' OR ');
-
+  // conflict check
   const checkQuery = `
-    SELECT id FROM bookings
-    WHERE date = ?
-    AND (
-      payment_status = 'paid'
-      OR (payment_status = 'pending' AND (expires_at IS NULL OR expires_at >= NOW()))
-    )
-    AND (${conds})
-    LIMIT 1
+    SELECT * FROM bookings 
+    WHERE date = ? 
+    AND (${newBooking.hours.map(() => `JSON_CONTAINS(hours, ?, '$')`).join(' OR ')})
   `;
-
-  const params = [dateStr];
-  newBooking.hours.forEach(hHy => {
-    const hEn = hHy.replace(/-/g, '–');
-    params.push(JSON.stringify(hHy)); // "20:00-21:00"
-    params.push(JSON.stringify(hEn)); // "20:00–21:00"
-  });
-
+  const params = [newBooking.date, ...newBooking.hours.map(h => JSON.stringify(h))];
   db.query(checkQuery, params, async (err, results) => {
     if (err) { console.error('❌ MySQL SELECT error:', err); return res.status(500).json({ message: 'Chyba serveru' }); }
     if (results.length > 0) return res.status(409).json({ message: 'Termín je již rezervovaný.' });
@@ -451,9 +340,6 @@ app.post('/book', publicLimiter, async (req, res) => {
     // compute price from settings (fallback to env)
     const PRICE_PER_HOUR_CZK = await getPriceCZK();
     const amount_czk = (Array.isArray(newBooking.hours) ? newBooking.hours.length : 0) * PRICE_PER_HOUR_CZK;
-    if (!Number.isFinite(amount_czk) || amount_czk <= 0) {
-      return res.status(500).json({ message: 'Neplatná cena rezervace. Kontaktujte prosím podporu.' });
-    }
     const orderNo = `TZ-${Date.now()}`;
 
     // insert as pending, with 15-minute expiry
@@ -463,7 +349,7 @@ app.post('/book', publicLimiter, async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, 'CZK', 'pending', ?, ?)
     `;
     db.query(insertQuery, [
-      dateStr,
+      newBooking.date,
       JSON.stringify(newBooking.hours),
       newBooking.name,
       newBooking.email,
@@ -536,26 +422,12 @@ app.post('/book', publicLimiter, async (req, res) => {
    ========================= */
 app.get('/bookings/:date', publicLimiter, (req, res) => {
   const date = req.params.date;
-  db.query(
-    `SELECT date, hours FROM bookings
-     WHERE date = ?
-     AND (
-       payment_status = 'paid'
-       OR (payment_status = 'pending' AND (expires_at IS NULL OR expires_at >= NOW()))
-     )`,
-    [date],
-    (err, results) => {
+  db.query('SELECT date, hours FROM bookings', [], (err, results) => {
     if (err) { console.error('❌ MySQL query error:', err); return res.status(500).json({ message: 'Server error' }); }
-    const allHours = results.flatMap((row) => {
-      if (typeof row.hours === 'string') {
-        try {
-          const arr = JSON.parse(row.hours);
-          return Array.isArray(arr) ? arr.map(h => String(h).replace(/–/g, '-')) : [];
-        } catch {
-          return [];
-        }
-      }
-      if (Array.isArray(row.hours)) return row.hours.map(h => String(h).replace(/–/g, '-'));
+    const matching = results.filter(row => new Date(row.date).toISOString().split('T')[0] === date);
+    const allHours = matching.flatMap((row) => {
+      if (typeof row.hours === 'string') { try { return JSON.parse(row.hours); } catch { return []; } }
+      if (Array.isArray(row.hours)) return row.hours;
       return [];
     });
     res.json({ hours: allHours });
@@ -568,28 +440,17 @@ app.get('/bookings/:date', publicLimiter, (req, res) => {
 app.get('/all-bookings', authMiddleware, (req, res) => {
   db.query('SELECT * FROM bookings', (err, results) => {
     if (err) { console.error('❌ MySQL query error:', err); return res.status(500).json({ message: 'Server error' }); }
-
-    const bookings = results.map((row) => {
-      const hoursArr = safeParseHours(row.hours);
-
-      // fallback text, aby FE nemusela nic splitovat
-      const hoursText = normalizeHoursToRanges(hoursArr);
-
-      return {
-        id: row.id,
-        date: row.date,
-        hours: hoursArr,                 // vždy array
-        hours_text: hoursText || '',      // vždy string
-        name: row.name,
-        email: row.email,
-        phone: row.phone,
-        payment_status: row.payment_status,
-        amount_czk: row.amount_czk,
-        expires_at: row.expires_at
-        expiresAt: row.expires_at
-      };
-    });
-
+    const bookings = results.map((row) => ({
+      id: row.id,
+      date: row.date,
+      hours: safeParseHours(row.hours),
+      name: row.name,
+      email: row.email,
+      phone: row.phone,
+      payment_status: row.payment_status,
+      amount_czk: row.amount_czk,
+      expires_at: row.expires_at
+    }));
     res.json(bookings);
   });
 });
@@ -617,131 +478,6 @@ app.post('/bookings/:id/cancel', authMiddleware, (req, res) => {
       res.status(200).json({ message: 'Rezervace zrušena a email odeslán (pokud bylo možné).' });
     });
   });
-});
-
-/* =========================
-   ADMIN: owner create booking (FREE, NO NOTIFICATIONS)
-   ========================= */
-
-// helper: build hourly slots from "HH:MM" to "HH:MM" (end exclusive)
-function buildHourlySlots(startHHMM, endHHMM) {
-  const parse = (t) => {
-    const m = String(t || '').match(/^(\d{2}):(\d{2})$/);
-    if (!m) return null;
-    const hh = Number(m[1]);
-    const mm = Number(m[2]);
-    if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
-    return hh * 60 + mm;
-  };
-  const fmt = (min) => {
-    const hh = String(Math.floor(min / 60)).padStart(2, '0');
-    const mm = String(min % 60).padStart(2, '0');
-    return `${hh}:${mm}`;
-  };
-
-  const start = parse(startHHMM);
-  const end = parse(endHHMM);
-  if (start == null || end == null) return null;
-  if (end <= start) return null;
-  if ((end - start) % 60 !== 0) return null;
-
-  const out = [];
-  for (let t = start; t < end; t += 60) {
-    out.push(`${fmt(t)}-${fmt(t + 60)}`);
-  }
-  return out;
-}
-
-app.post('/admin/owner-booking', authMiddleware, async (req, res) => {
-  try {
-    const { date, startTime, endTime } = req.body || {};
-
-    // Basic validation
-    const dateStr = String(date || '').trim();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-      return res.status(400).json({ message: 'Neplatné datum. Použij YYYY-MM-DD.' });
-    }
-
-    const hoursArr = buildHourlySlots(String(startTime || ''), String(endTime || ''));
-    if (!hoursArr || hoursArr.length === 0) {
-      return res.status(400).json({ message: 'Použij startTime/endTime (např. startTime=20:00, endTime=23:00).' });
-    }
-
-   // no past bookings (compare in Prague local day)
-   const todayPrg = todayPragueYYYYMMDD();
-   if (dateStr < todayPrg) {
-     return res.status(400).json({ message: 'Nelze rezervovat zpětně.' });
-   }
-
-    // normalize hour strings for checks
-    const hoursNorm = hoursArr.map(h => String(h).trim().replace(/–/g, '-'));
-
-    // conflict check:
-    // Some existing bookings might contain en-dash "–" instead of "-", so check both variants.
-    const conds = hoursNorm.map(() => `(JSON_CONTAINS(hours, ?, '$') OR JSON_CONTAINS(hours, ?, '$'))`).join(' OR ');
-    const checkQuery = `
-      SELECT id FROM bookings
-      WHERE date = ?
-      AND (
-        payment_status = 'paid'
-        OR (payment_status = 'pending' AND (expires_at IS NULL OR expires_at >= NOW()))
-      )
-      AND (${conds})
-      LIMIT 1
-    `;
-
-    const params = [dateStr];
-    hoursNorm.forEach(hHy => {
-      const hEn = hHy.replace(/-/g, '–');
-      params.push(JSON.stringify(hHy));
-      params.push(JSON.stringify(hEn));
-    });
-
-    db.query(checkQuery, params, (selErr, rows) => {
-      if (selErr) {
-        console.error('❌ owner-booking conflict SELECT error:', selErr);
-        return res.status(500).json({ message: 'DB error' });
-      }
-      if (rows && rows.length > 0) {
-        return res.status(409).json({ message: 'Termín je již rezervovaný.' });
-      }
-
-      // Insert "paid" owner booking, no notifications, no GoPay fields
-      const insertQuery = `
-        INSERT INTO bookings
-          (date, hours, name, email, phone, amount_czk, currency, payment_status)
-        VALUES
-          (?, ?, ?, ?, ?, ?, 'CZK', 'paid')
-      `;
-
-      db.query(
-        insertQuery,
-        [
-          dateStr,
-          JSON.stringify(hoursNorm),
-          'Owner',              // placeholder
-          'owner@local',        // placeholder
-          '+000000000000',      // placeholder (E.164-ish)
-          0
-        ],
-        (insErr, result) => {
-          if (insErr) {
-            console.error('❌ owner-booking INSERT error:', insErr);
-            return res.status(500).json({ message: 'Chyba při ukládání' });
-          }
-          return res.json({
-            ok: true,
-            booking_id: result.insertId,
-            date: dateStr,
-            hours: hoursNorm
-          });
-        }
-      );
-    });
-  } catch (e) {
-    console.error('❌ owner-booking error:', e);
-    return res.status(500).json({ message: 'Server error' });
-  }
 });
 
 /* =========================
@@ -834,10 +570,7 @@ app.post('/admin/sms/send-test', authMiddleware, async (req, res) => {
 /* =========================
    GOPAY: webhook (no auto-cancel on non-PAID)
    ========================= */
-app.all('/gopay/webhook',
-  express.urlencoded({ extended: false }),
-  express.json(),
-  async (req, res) => {
+app.all('/gopay/webhook', express.urlencoded({ extended: false }), async (req, res) => {
   try {
     const id =
       (req.query && (req.query.id || req.query.parent_id)) ||
@@ -860,19 +593,10 @@ app.all('/gopay/webhook',
 
       if (state === 'PAID') {
         db.query(
-          `UPDATE bookings
-           SET payment_status='paid', payment_paid_at=NOW(), payment_error=NULL
-           WHERE id=? AND payment_status!='paid'`,
+          `UPDATE bookings SET payment_status='paid', payment_paid_at=NOW(), payment_error=NULL WHERE id=?`,
           [row.id],
-          async (upErr, result) => {
-            if (upErr) {
-              console.error('❌ MySQL UPDATE error:', upErr);
-              return res.status(200).json({ ok: true, note: 'db error' });
-            }
-
-            if (!result || result.affectedRows !== 1) {
-              return res.status(200).json({ ok: true, state: 'PAID', note: 'already processed' });
-            }
+          async (upErr) => {
+            if (upErr) console.error('❌ MySQL UPDATE error:', upErr);
             try {
               const accessCode = await getAccessCode();
               await sendConfirmationEmail({
@@ -991,7 +715,6 @@ setInterval(() => {
    ========================= */
 app.get('/confirm/:id', async (req, res) => {
   const bookingId = req.params.id;
-
   db.query('SELECT * FROM bookings WHERE id = ?', [bookingId], async (err, rows) => {
     if (err) return res.status(500).json({ message: 'DB error' });
     if (!rows || rows.length === 0) return res.status(404).json({ message: 'Booking not found' });
@@ -1005,36 +728,20 @@ app.get('/confirm/:id', async (req, res) => {
 
       if (state === 'PAID') {
         db.query(
-          `UPDATE bookings
-           SET payment_status='paid', payment_paid_at=NOW(), payment_error=NULL
-           WHERE id=? AND payment_status!='paid'`,
+          `UPDATE bookings SET payment_status='paid', payment_paid_at=NOW(), payment_error=NULL WHERE id=?`,
           [row.id],
-          async (upErr, result) => {
-            if (upErr) {
-              console.error('❌ confirm UPDATE error:', upErr);
-              return res.status(500).json({ message: 'DB error' });
-            }
-
-            if (!result || result.affectedRows !== 1) {
-              // už bylo paid, tak nic znovu neposílej
-              return res.json({ ok: true, state: 'PAID', note: 'already processed' });
-            }
-
+          async (upErr) => {
+            if (upErr) console.error('❌ confirm UPDATE error:', upErr);
             try {
               const hours = safeParseHours(row.hours);
               const accessCode = await getAccessCode();
               await sendConfirmationEmail({
-                name: row.name,
-                email: row.email,
-                date: row.date,
-                hours,
-                phone: row.phone,
+                name: row.name, email: row.email, date: row.date, hours, phone: row.phone,
                 accessCode
               });
             } catch (e) {
               console.error('❌ confirm sendConfirmationEmail error:', e);
             }
-
             return res.json({ ok: true, state: 'PAID' });
           }
         );
