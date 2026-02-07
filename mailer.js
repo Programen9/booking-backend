@@ -136,6 +136,7 @@ async function sendConfirmationEmail(booking) {
     </ul>
     <p><strong>Přístupový kód do zkušebny:</strong> ${accessCode}</p>
     <p>Adresu a návod, jak se do zkušebny dostat, najdete na <a href="https://topzkusebny.cz/#kudy-kam" target="_blank">TopZkusebny.cz/#kudy-kam</a>.</p>
+    <p>PS: Za každou zarezervovanou hodinu si můžete z lednice vzít <strong>jeden nápoj zdarma ;)</strong></p>
   `;
   await sendMail({ to: email, subject, html });
 }
