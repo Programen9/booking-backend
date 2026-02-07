@@ -598,7 +598,7 @@ app.post('/admin/internal-book', authMiddleware, (req, res) => {
   for (let h = startHour; h < endHour; h++) {
     const a = String(h).padStart(2, '0') + ':00';
     const b = String(h + 1).padStart(2, '0') + ':00';
-    hours.push(`${a}-${b}`);
+    hours.push(`${a}–${b}`);
   }
 
   if (hours.length === 0) {
