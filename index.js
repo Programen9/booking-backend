@@ -568,6 +568,95 @@ app.post('/admin/sms/send-test', authMiddleware, async (req, res) => {
 });
 
 /* =========================
+   ADMIN: internal booking (free, no notifications)
+   ========================= */
+app.post('/admin/internal-book', authMiddleware, (req, res) => {
+  const { name, date, start, end } = req.body || {};
+
+  if (!name || !date || !start || !end) {
+    return res.status(400).json({ message: 'Chybí povinná pole.' });
+  }
+
+  // only whole hours
+  if (!/^\d{2}:00$/.test(start) || !/^\d{2}:00$/.test(end)) {
+    return res.status(400).json({ message: 'Časy musí být celé hodiny ve tvaru HH:00.' });
+  }
+
+  if (start >= end) {
+    return res.status(400).json({ message: 'Čas "start" musí být před časem "konec".' });
+  }
+
+  // build hours: ["18:00-19:00", "19:00-20:00", ...]
+  const startHour = Number(start.slice(0, 2));
+  const endHour = Number(end.slice(0, 2));
+
+  if (!Number.isFinite(startHour) || !Number.isFinite(endHour)) {
+    return res.status(400).json({ message: 'Neplatný čas.' });
+  }
+
+  const hours = [];
+  for (let h = startHour; h < endHour; h++) {
+    const a = String(h).padStart(2, '0') + ':00';
+    const b = String(h + 1).padStart(2, '0') + ':00';
+    hours.push(`${a}-${b}`);
+  }
+
+  if (hours.length === 0) {
+    return res.status(400).json({ message: 'Neplatný rozsah hodin.' });
+  }
+
+  // conflict check (any status)
+  const checkQuery = `
+    SELECT id FROM bookings
+    WHERE date = ?
+    AND (${hours.map(() => `JSON_CONTAINS(hours, ?, '$')`).join(' OR ')})
+    LIMIT 1
+  `;
+  const params = [date, ...hours.map(h => JSON.stringify(h))];
+
+  db.query(checkQuery, params, (err, results) => {
+    if (err) {
+      console.error('❌ MySQL SELECT error:', err);
+      return res.status(500).json({ message: 'Chyba serveru.' });
+    }
+    if (results.length > 0) {
+      return res.status(409).json({ message: 'Termín je již rezervovaný.' });
+    }
+
+    const insertQuery = `
+      INSERT INTO bookings (date, hours, name, email, phone, amount_czk, currency, payment_status)
+      VALUES (?, ?, ?, ?, ?, ?, 'CZK', 'paid')
+    `;
+
+    db.query(
+      insertQuery,
+      [date, JSON.stringify(hours), String(name), '', '', 0],
+      (insErr, result) => {
+        if (insErr) {
+          console.error('❌ MySQL INSERT error:', insErr);
+          return res.status(500).json({ message: 'Chyba při ukládání.' });
+        }
+
+        return res.json({
+          ok: true,
+          booking: {
+            id: result.insertId,
+            date,
+            hours,
+            name,
+            email: '',
+            phone: '',
+            amount_czk: 0,
+            payment_status: 'paid',
+            expires_at: null,
+          }
+        });
+      }
+    );
+  });
+});
+
+/* =========================
    GOPAY: webhook (no auto-cancel on non-PAID)
    ========================= */
 app.all('/gopay/webhook', express.urlencoded({ extended: false }), async (req, res) => {
