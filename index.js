@@ -739,6 +739,32 @@ app.all('/gopay/webhook', express.urlencoded({ extended: false }), async (req, r
                   console.error('❌ Reception SMS failed:', e?.message || e, 'booking id=', row.id);
                 }
 
+                // 3) SMS pro pana Fábryho
+
+                try {
+                  const fabryRaw = process.env.FABRY_PHONE_E164 || '+420721839382';
+                  const fabryTo = normalizeAndValidatePhoneE164(fabryRaw);
+
+                  if (!fabryTo) {
+                    console.error('❌ Invalid FABRY_PHONE_E164:', fabryRaw, 'booking id=', row.id);
+                  } else {
+                    const smsTextFabry = buildReceptionSmsText({
+                      name: row.name,
+                      date: row.date,
+                      hours,
+                    });
+
+                    const smsResFabry = await sendSms({
+                      to: fabryTo,
+                      body: smsTextFabry,
+                    });
+
+                    console.log('✅ Fabry SMS sent for booking id', row.id, 'sid=', smsResFabry.sid, 'status=', smsResFabry.status);
+                  }
+                } catch (e) {
+                  console.error('❌ Fabry SMS failed:', e?.message || e, 'booking id=', row.id);
+                }
+
                 // DB status držíme podle uživatelské SMS
                 db.query(
                   `UPDATE bookings SET sms_status='sent', sms_sent_at=NOW(), sms_message_sid=?, sms_error=NULL WHERE id=?`,
